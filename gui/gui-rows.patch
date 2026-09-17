@@ -1,3 +1,41 @@
+diff --git a/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts b/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
+index c560ef9ad2..68638c473c 100644
+--- a/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
++++ b/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
+@@ -1,5 +1,7 @@
+ import { useEffect, useRef, useState } from 'react'
+ 
++import { audioInputConstraints, isMissingDeviceError } from '@/lib/voice-devices'
++
+ type BrowserAudioContext = typeof AudioContext
+ 
+ export interface MicRecorderOptions {
+@@ -192,9 +194,22 @@ export function useMicRecorder(copy: MicRecorderErrorCopy): {
+     let stream: MediaStream
+ 
+     try {
+-      stream = await navigator.mediaDevices.getUserMedia({
+-        audio: { echoCancellation: true, noiseSuppression: true }
+-      })
++      const constraints: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true }
++
++      try {
++        // The configured microphone is pinned: a silent switch to the default is exactly the
++        // behaviour that setting exists to prevent. An unplugged device raises
++        // OverconstrainedError, which falls back below rather than failing the recording.
++        stream = await navigator.mediaDevices.getUserMedia({ audio: audioInputConstraints(constraints) })
++      } catch (error) {
++        if (!isMissingDeviceError(error)) {
++          throw error
++        }
++
++        console.warn('[hermes] configured microphone unavailable, using the system default', error)
++
++        stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
++      }
+     } catch (error) {
+       throw micError(error, copy)
+     }
 diff --git a/apps/desktop/src/app/settings/config-field.preview-wiring.test.tsx b/apps/desktop/src/app/settings/config-field.preview-wiring.test.tsx
 new file mode 100644
 index 0000000000..fd538bf64e
@@ -60,23 +98,28 @@ index 0000000000..fd538bf64e
 +  })
 +})
 diff --git a/apps/desktop/src/app/settings/config-field.tsx b/apps/desktop/src/app/settings/config-field.tsx
-index 43d713ef6a..9d73922779 100644
+index 43d713ef6a..eb8f10b3d6 100644
 --- a/apps/desktop/src/app/settings/config-field.tsx
 +++ b/apps/desktop/src/app/settings/config-field.tsx
-@@ -15,6 +15,12 @@ import { FallbackModelsField } from './fallback-models-field'
+@@ -15,6 +15,17 @@ import { FallbackModelsField } from './fallback-models-field'
  import { fieldCopyForSchemaKey } from './field-copy'
  import { ListRow } from './primitives'
  import { SearchableSelect } from './searchable-select'
++import { VoiceDevicePicker } from './voice-device-picker'
 +import { VoicePreviewButton } from './voice-preview-button'
 +
 +// Rows whose value is audible: the local OpenRouter patch puts an audition button beside them, so a
 +// voice or a playback rate can be checked without leaving Settings (it previews the CURRENT
 +// model + voice + speed, including values the autosave has just written).
 +const AUDITION_KEYS = new Set(['tts.openrouter.voice', 'tts.openrouter.speed'])
++
++// Device rows need a control that enumerates the machine's hardware, which a static option list
++// cannot express — they get their own picker (with a "System default" entry).
++const DEVICE_KEYS = new Set(['voice.mic_device_id', 'voice.speaker_device_id'])
  
  /**
   * One generic config row: label + description resolved from the i18n field
-@@ -78,7 +84,22 @@ export function ConfigField({
+@@ -78,7 +89,22 @@ export function ConfigField({
    // point at one setting (`[data-tour="field-model"]`) without hunting through
    // the section for an nth-child path. See lib/tour.
    const row = (action: ReactNode, wide = false) => (
@@ -100,8 +143,25 @@ index 43d713ef6a..9d73922779 100644
    )
  
    // `fallback_providers` is a list of {provider, model} objects; the generic
+@@ -88,6 +114,16 @@ export function ConfigField({
+     return row(<FallbackModelsField onChange={onChange} value={value} />, true)
+   }
+ 
++  if (DEVICE_KEYS.has(schemaKey)) {
++    return row(
++      <VoiceDevicePicker
++        onChange={next => onChange(next)}
++        schemaKey={schemaKey}
++        value={String(value ?? '')}
++      />
++    )
++  }
++
+   if (schema.type === 'boolean') {
+     return row(
+       <div className="flex items-center justify-end">
 diff --git a/apps/desktop/src/app/settings/constants.ts b/apps/desktop/src/app/settings/constants.ts
-index 0a0c04b03c..db3d74d61d 100644
+index 0a0c04b03c..17f535d518 100644
 --- a/apps/desktop/src/app/settings/constants.ts
 +++ b/apps/desktop/src/app/settings/constants.ts
 @@ -361,6 +361,149 @@ export const ENUM_OPTIONS: Record<string, string[]> = {
@@ -679,7 +739,7 @@ index 0a0c04b03c..db3d74d61d 100644
  export const FREE_INPUT_KEYS = new Set([
    'tts.edge.voice',
    'voice.gpt_live.voice',
-@@ -391,12 +952,20 @@ export const FREE_INPUT_KEYS = new Set([
+@@ -391,12 +952,24 @@ export const FREE_INPUT_KEYS = new Set([
    'tts.kittentts.voice',
    'tts.piper.voice',
    'tts.deepinfra.model',
@@ -687,7 +747,9 @@ index 0a0c04b03c..db3d74d61d 100644
 +  'tts.deepinfra.voice',
 +  'stt.openrouter.model',
 +  'tts.openrouter.model',
-+  'tts.openrouter.voice'
++  'tts.openrouter.voice',
++  'voice.mic_device_id',
++  'voice.speaker_device_id'
  ])
  
  export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
@@ -695,24 +757,28 @@ index 0a0c04b03c..db3d74d61d 100644
    modelContextLength: 'Context Window',
 +  // Provider-scoped voice rows: the fallback label is prettyName(lastSegment) => a bare "Model".
 +  'stt.openrouter.model': 'OpenRouter Model',
++  'voice.mic_device_id': 'Microphone',
++  'voice.speaker_device_id': 'Speaker',
 +  'tts.openrouter.model': 'OpenRouter Voice Model',
 +  'tts.openrouter.voice': 'OpenRouter Voice',
 +  'tts.openrouter.speed': 'OpenRouter Playback Speed',
    fallbackProviders: 'Fallback Models',
    toolsets: 'Enabled Toolsets',
    timezone: 'Timezone',
-@@ -572,6 +1141,10 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
+@@ -572,6 +1145,12 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
  export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
    model: 'Used for new chats unless you pick a different model in the composer.',
    modelContextLength: "Leave at 0 to use the selected model's detected context window.",
 +  'stt.openrouter.model': 'Vendor-prefixed OpenRouter slug, e.g. openai/whisper-large-v3. Audited live: meta/muse-voice-transcribe-1.0 needs 16 or 24 kHz WAV.',
++  'voice.mic_device_id': 'Which microphone to record from. "System default" follows whatever macOS is currently set to — picking a device here pins it, so a headset connecting later cannot take over mid-session.',
++  'voice.speaker_device_id': 'Which speaker to play replies through. Separate from the wake-word input_device, which is a PortAudio device used by the Python side.',
 +  'tts.openrouter.model': 'Vendor-prefixed OpenRouter speech slug, e.g. deepgram/aura-2. Hexgrad Kokoro emits only the first sentence; Gemini TTS needs pcm.',
 +  'tts.openrouter.voice': 'Voice for the selected model — the list follows the model, since voices are model-specific.',
 +  'tts.openrouter.speed': 'Playback speed. 0.7 = slower, 1.0 = normal, 1.5 = faster. Applied natively where the model supports it, otherwise by a local pitch-preserving time-stretch.',
    fallbackProviders: 'Backup provider:model entries to try if the default model fails.',
    display: {
      personality: 'Default assistant style for new sessions.',
-@@ -747,6 +1320,9 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -747,6 +1326,9 @@ export const SECTIONS: DesktopConfigSection[] = [
        'stt.enabled',
        'stt.echo_transcripts',
        'stt.provider',
@@ -722,7 +788,7 @@ index 0a0c04b03c..db3d74d61d 100644
        'voice.auto_tts',
        'tts.edge.voice',
        'tts.openai.model',
-@@ -773,6 +1349,12 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -773,6 +1355,12 @@ export const SECTIONS: DesktopConfigSection[] = [
        'tts.piper.voice',
        'tts.deepinfra.model',
        'tts.deepinfra.voice',
@@ -735,6 +801,17 @@ index 0a0c04b03c..db3d74d61d 100644
        'stt.local.model',
        'stt.local.language',
        'stt.openai.model',
+@@ -783,6 +1371,10 @@ export const SECTIONS: DesktopConfigSection[] = [
+       'stt.elevenlabs.tag_audio_events',
+       'stt.elevenlabs.diarize',
+       'voice.record_key',
++      // Device rows (browser device ids; empty = system default). Grouped with the other voice
++      // capture keys, and rendered by voice-device-picker.tsx rather than the generic text box.
++      'voice.mic_device_id',
++      'voice.speaker_device_id',
+       'voice.max_recording_seconds',
+       'voice.client_direct'
+     ]
 diff --git a/apps/desktop/src/app/settings/helpers.ts b/apps/desktop/src/app/settings/helpers.ts
 index b51162f854..cc4d4d8313 100644
 --- a/apps/desktop/src/app/settings/helpers.ts
@@ -776,6 +853,201 @@ index b51162f854..cc4d4d8313 100644
    if (!opts) {
      return undefined
    }
+diff --git a/apps/desktop/src/app/settings/voice-device-picker.test.tsx b/apps/desktop/src/app/settings/voice-device-picker.test.tsx
+new file mode 100644
+index 0000000000..a1423f1943
+--- /dev/null
++++ b/apps/desktop/src/app/settings/voice-device-picker.test.tsx
+@@ -0,0 +1,91 @@
++import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
++import { afterEach, describe, expect, it, vi } from 'vitest'
++
++import { stubMenuDomApis, stubResizeObserver } from '@/test/jsdom'
++
++import { VoiceDevicePicker } from './voice-device-picker'
++
++// Radix's Select content needs browser APIs jsdom lacks (ResizeObserver, pointer capture); without
++// them it throws on open, which presents as "the options never appear".
++stubResizeObserver()
++stubMenuDomApis()
++
++const DEVICES = [
++  { deviceId: 'mic-a', kind: 'audioinput', label: 'MacBook Pro Microphone' },
++  { deviceId: 'mic-b', kind: 'audioinput', label: 'AirPods Pro' },
++  { deviceId: 'spk-a', kind: 'audiooutput', label: 'MacBook Pro Speakers' }
++] as MediaDeviceInfo[]
++
++function stubDevices(devices: MediaDeviceInfo[] = DEVICES) {
++  Object.defineProperty(navigator, 'mediaDevices', {
++    configurable: true,
++    value: {
++      addEventListener: vi.fn(),
++      enumerateDevices: vi.fn().mockResolvedValue(devices),
++      removeEventListener: vi.fn()
++    }
++  })
++}
++
++afterEach(() => cleanup())
++
++describe('VoiceDevicePicker', () => {
++  it('lists the microphones plus a system-default entry, and reports the choice', async () => {
++    stubDevices()
++    const onChange = vi.fn()
++
++    render(<VoiceDevicePicker onChange={onChange} schemaKey="voice.mic_device_id" value="" />)
++
++    // the picker seeds from an async enumeration; the closed trigger shows the selection only,
++    // so the device options are asserted with the listbox open
++    await waitFor(() => expect(screen.getByText('System default')).toBeTruthy())
++
++    fireEvent.click(screen.getByRole('combobox'))
++    expect(await screen.findByRole('option', { name: 'MacBook Pro Microphone' })).toBeTruthy()
++    expect(within(screen.getByRole('listbox')).getByText('System default')).toBeTruthy()
++    expect(screen.getByRole('option', { name: 'AirPods Pro' })).toBeTruthy()
++    // an output device must not be offered as an input
++    expect(screen.queryByRole('option', { name: 'MacBook Pro Speakers' })).toBeNull()
++
++    fireEvent.click(screen.getByRole('option', { name: 'AirPods Pro' }))
++
++    await waitFor(() => expect(onChange).toHaveBeenCalledWith('mic-b'))
++  })
++
++  it('offers speakers for the output row', async () => {
++    stubDevices()
++
++    render(<VoiceDevicePicker onChange={vi.fn()} schemaKey="voice.speaker_device_id" value="" />)
++
++    await waitFor(() => expect(screen.getByText('System default')).toBeTruthy())
++
++    fireEvent.click(screen.getByRole('combobox'))
++    expect(await screen.findByRole('option', { name: 'MacBook Pro Speakers' })).toBeTruthy()
++    expect(screen.queryByRole('option', { name: 'AirPods Pro' })).toBeNull()
++  })
++
++  it('flags a configured device that is no longer connected', async () => {
++    stubDevices()
++
++    render(<VoiceDevicePicker onChange={vi.fn()} schemaKey="voice.mic_device_id" value="mic-gone" />)
++
++    expect(await screen.findByText(/not connected/)).toBeTruthy()
++  })
++
++  it('stays quiet when the configured device is present', async () => {
++    stubDevices()
++
++    render(<VoiceDevicePicker onChange={vi.fn()} schemaKey="voice.mic_device_id" value="mic-a" />)
++
++    await waitFor(() => expect(screen.getByText('MacBook Pro Microphone')).toBeTruthy())
++    expect(screen.queryByText(/not connected/)).toBeNull()
++  })
++
++  it('explains an empty device list (permissions not granted yet)', async () => {
++    stubDevices([])
++
++    render(<VoiceDevicePicker onChange={vi.fn()} schemaKey="voice.mic_device_id" value="" />)
++
++    expect(await screen.findByText(/No devices found/)).toBeTruthy()
++  })
++})
+diff --git a/apps/desktop/src/app/settings/voice-device-picker.tsx b/apps/desktop/src/app/settings/voice-device-picker.tsx
+new file mode 100644
+index 0000000000..73a4f0e03f
+--- /dev/null
++++ b/apps/desktop/src/app/settings/voice-device-picker.tsx
+@@ -0,0 +1,92 @@
++import { useEffect, useState } from 'react'
++
++import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
++import { deviceLabel, listVoiceDevices, VOICE_INPUT_DEVICE_KEY } from '@/lib/voice-devices'
++
++import { CONTROL_TEXT, EMPTY_SELECT_VALUE } from './constants'
++
++/**
++ * Microphone / speaker picker (part of the local GUI patch).
++ *
++ * Enumerated at open time and re-enumerated on `devicechange`, so plugging in a headset updates the
++ * list without a reload. Two things it is careful about:
++ *
++ *  - **A configured device that is no longer connected is called out** rather than silently replaced
++ *    by the default — the surprise this setting exists to remove. Recording falls back to the
++ *    default in that case (see `voice-devices.ts`), but the row says so.
++ *  - Labels are empty until the page has been granted microphone access, so entries fall back to
++ *    "Microphone N" / "Speaker N" instead of rendering blank rows.
++ */
++export function VoiceDevicePicker({
++  schemaKey,
++  value,
++  onChange
++}: {
++  schemaKey: string
++  value: string
++  onChange: (next: string) => void
++}) {
++  const kind = schemaKey === VOICE_INPUT_DEVICE_KEY ? 'input' : 'output'
++  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
++  const [loaded, setLoaded] = useState(false)
++
++  useEffect(() => {
++    let cancelled = false
++
++    const load = async () => {
++      const lists = await listVoiceDevices()
++
++      if (!cancelled) {
++        setDevices(kind === 'input' ? lists.inputs : lists.outputs)
++        setLoaded(true)
++      }
++    }
++
++    void load()
++
++    const media = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices
++    media?.addEventListener?.('devicechange', load)
++
++    return () => {
++      cancelled = true
++      media?.removeEventListener?.('devicechange', load)
++    }
++  }, [kind])
++
++  const current = value.trim()
++  const missing = Boolean(current) && loaded && !devices.some(device => device.deviceId === current)
++
++  return (
++    <div className="flex flex-col items-end gap-1">
++      <Select
++        onValueChange={next => onChange(next === EMPTY_SELECT_VALUE ? '' : next)}
++        value={current || EMPTY_SELECT_VALUE}
++      >
++        <SelectTrigger className={CONTROL_TEXT}>
++          <SelectValue />
++        </SelectTrigger>
++        <SelectContent>
++          <SelectItem value={EMPTY_SELECT_VALUE}>System default</SelectItem>
++          {devices.map((device, index) => (
++            <SelectItem
++              key={device.deviceId || index}
++              value={device.deviceId || EMPTY_SELECT_VALUE}
++            >
++              {deviceLabel(device, index, kind)}
++            </SelectItem>
++          ))}
++        </SelectContent>
++      </Select>
++      {missing ? (
++        <span className="max-w-56 text-right text-xs text-muted-foreground">
++          That device is not connected — the system default is used until it is back.
++        </span>
++      ) : null}
++      {loaded && devices.length === 0 ? (
++        <span className="max-w-56 text-right text-xs text-muted-foreground">
++          No devices found. Grant microphone access, then reopen this page.
++        </span>
++      ) : null}
++    </div>
++  )
++}
 diff --git a/apps/desktop/src/app/settings/voice-preview-button.test.tsx b/apps/desktop/src/app/settings/voice-preview-button.test.tsx
 new file mode 100644
 index 0000000000..0b258bbcba
@@ -957,3 +1229,316 @@ index 0000000000..ae2c5c7173
 +    </div>
 +  )
 +}
+diff --git a/apps/desktop/src/lib/voice-barge-in.ts b/apps/desktop/src/lib/voice-barge-in.ts
+index 4d521f33d1..ebfc6f8066 100644
+--- a/apps/desktop/src/lib/voice-barge-in.ts
++++ b/apps/desktop/src/lib/voice-barge-in.ts
+@@ -19,6 +19,8 @@
+ // - Detection is a windowed majority (>=80% of the last SUSTAINED_MS above
+ //   trigger) so intra-word energy dips don't reset progress.
+ 
++import { audioInputConstraints, isMissingDeviceError } from '@/lib/voice-devices'
++
+ const CALIBRATION_MS = 400
+ const SUSTAINED_MS = 300
+ const SUSTAINED_MAJORITY = 0.8
+@@ -157,9 +159,21 @@ export function monitorSpeechDuringPlayback(callbacks: BargeMonitorCallbacks): (
+   }
+   void (async () => {
+     try {
+-      stream = await navigator.mediaDevices.getUserMedia({
+-        audio: { echoCancellation: true, noiseSuppression: true }
+-      })
++      const bargeConstraints: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true }
++
++      try {
++        // Same pinned microphone as the recorder: listening on the default while recording from
++        // another device would make barge-in react to a microphone nobody is speaking into.
++        stream = await navigator.mediaDevices.getUserMedia({ audio: audioInputConstraints(bargeConstraints) })
++      } catch (error) {
++        if (!isMissingDeviceError(error)) {
++          throw error
++        }
++
++        console.warn('[hermes] configured microphone unavailable, using the system default', error)
++
++        stream = await navigator.mediaDevices.getUserMedia({ audio: bargeConstraints })
++      }
+ 
+       if (disposed) {
+         cleanup()
+diff --git a/apps/desktop/src/lib/voice-devices.test.ts b/apps/desktop/src/lib/voice-devices.test.ts
+new file mode 100644
+index 0000000000..bb47c6e621
+--- /dev/null
++++ b/apps/desktop/src/lib/voice-devices.test.ts
+@@ -0,0 +1,112 @@
++import { afterEach, describe, expect, it, vi } from 'vitest'
++
++import { HERMES_CONFIG_KEY } from '@/app/hooks/use-config-record'
++import { queryClient } from '@/lib/query-client'
++
++import {
++  applyAudioOutputDevice,
++  audioInputConstraints,
++  deviceLabel,
++  isMissingDeviceError,
++  voiceInputDeviceId,
++  voiceOutputDeviceId
++} from './voice-devices'
++
++function seedConfig(record: unknown) {
++  queryClient.setQueryData(HERMES_CONFIG_KEY, record)
++}
++
++afterEach(() => {
++  queryClient.clear()
++  vi.restoreAllMocks()
++})
++
++describe('voice device config readers', () => {
++  it('reads the configured microphone and speaker ids', () => {
++    seedConfig({ voice: { mic_device_id: 'mic-42', speaker_device_id: 'spk-7' } })
++
++    expect(voiceInputDeviceId()).toBe('mic-42')
++    expect(voiceOutputDeviceId()).toBe('spk-7')
++  })
++
++  it('treats empty, missing and malformed values as "system default"', () => {
++    seedConfig({ voice: { mic_device_id: '  ' } })
++    expect(voiceInputDeviceId()).toBe('')
++    expect(voiceOutputDeviceId()).toBe('')
++
++    seedConfig({ voice: null })
++    expect(voiceInputDeviceId()).toBe('')
++
++    seedConfig(undefined)
++    expect(voiceInputDeviceId()).toBe('')
++    expect(voiceOutputDeviceId()).toBe('')
++  })
++})
++
++describe('getUserMedia constraints', () => {
++  it('pins the configured microphone exactly, keeping the caller constraints', () => {
++    seedConfig({ voice: { mic_device_id: 'mic-42' } })
++
++    const constraints = audioInputConstraints({ echoCancellation: true, noiseSuppression: true })
++
++    expect(constraints).toEqual({
++      echoCancellation: true,
++      noiseSuppression: true,
++      deviceId: { exact: 'mic-42' }
++    })
++  })
++
++  it('requests no device when none is configured', () => {
++    seedConfig({ voice: {} })
++
++    expect(audioInputConstraints({ echoCancellation: true })).toEqual({ echoCancellation: true })
++  })
++
++  it('recognises the "device is gone" errors only', () => {
++    expect(isMissingDeviceError({ name: 'OverconstrainedError' })).toBe(true)
++    expect(isMissingDeviceError({ name: 'NotFoundError' })).toBe(true)
++    expect(isMissingDeviceError({ name: 'NotAllowedError' })).toBe(false)
++    expect(isMissingDeviceError(null)).toBe(false)
++  })
++})
++
++describe('output device routing', () => {
++  function fakeAudio(sink?: (id: string) => Promise<void>) {
++    return (sink ? { setSinkId: sink } : {}) as unknown as HTMLAudioElement
++  }
++
++  it('routes playback to the configured speaker', async () => {
++    seedConfig({ voice: { speaker_device_id: 'spk-7' } })
++    const setSinkId = vi.fn().mockResolvedValue(undefined)
++
++    await applyAudioOutputDevice(fakeAudio(setSinkId))
++
++    expect(setSinkId).toHaveBeenCalledWith('spk-7')
++  })
++
++  it('leaves the default alone when nothing is configured', async () => {
++    seedConfig({ voice: {} })
++    const setSinkId = vi.fn()
++
++    await applyAudioOutputDevice(fakeAudio(setSinkId))
++
++    expect(setSinkId).not.toHaveBeenCalled()
++  })
++
++  it('does not throw when the element or browser cannot switch sink', async () => {
++    seedConfig({ voice: { speaker_device_id: 'spk-7' } })
++    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
++
++    await applyAudioOutputDevice(fakeAudio())                                    // unsupported
++    await applyAudioOutputDevice(fakeAudio(vi.fn().mockRejectedValue(new Error('nope'))))
++
++    expect(warn).toHaveBeenCalledTimes(1)
++  })
++})
++
++describe('device labels', () => {
++  it('falls back to a positional name when permissions hide labels', () => {
++    expect(deviceLabel({ label: '' } as MediaDeviceInfo, 1, 'input')).toBe('Microphone 2')
++    expect(deviceLabel({ label: 'AirPods' } as MediaDeviceInfo, 0, 'output')).toBe('AirPods')
++  })
++})
+diff --git a/apps/desktop/src/lib/voice-devices.ts b/apps/desktop/src/lib/voice-devices.ts
+new file mode 100644
+index 0000000000..a5d8488d6e
+--- /dev/null
++++ b/apps/desktop/src/lib/voice-devices.ts
+@@ -0,0 +1,123 @@
++import { HERMES_CONFIG_KEY } from '@/app/hooks/use-config-record'
++import { queryClient } from '@/lib/query-client'
++import type { HermesConfigRecord } from '@/types/hermes'
++
++/**
++ * Microphone / speaker selection for the desktop (part of the local GUI patch).
++ *
++ * Two distinct namespaces exist in the config, and mixing them would be a bug:
++ *
++ *  - `wake_word.input_device` is a **PortAudio** index/name, consumed by the Python side
++ *    (sounddevice) for wake-word capture.
++ *  - `voice.mic_device_id` / `voice.speaker_device_id` (here) are **browser device ids** from
++ *    `navigator.mediaDevices.enumerateDevices()`, consumed by the renderer's recorder, its barge-in
++ *    analyser and its playback element. Empty or absent = the system default, which is also what
++ *    happens today.
++ *
++ * The reads go through the React Query cache because playback and barge-in are plain modules, not
++ * components — the same `queryClient.getQueryData(...)` pattern the kanban and slash-cache modules
++ * use.
++ */
++export const VOICE_INPUT_DEVICE_KEY = 'voice.mic_device_id'
++export const VOICE_OUTPUT_DEVICE_KEY = 'voice.speaker_device_id'
++
++function readNested(record: unknown, path: string): string {
++  let node: unknown = record
++
++  for (const part of path.split('.')) {
++    if (!node || typeof node !== 'object') {
++      return ''
++    }
++
++    node = (node as Record<string, unknown>)[part]
++  }
++
++  return typeof node === 'string' ? node.trim() : ''
++}
++
++function configRecord(): unknown {
++  try {
++    return queryClient.getQueryData<HermesConfigRecord>(HERMES_CONFIG_KEY)
++  } catch {
++    return undefined
++  }
++}
++
++/** Configured microphone id, or '' for the system default. */
++export function voiceInputDeviceId(): string {
++  return readNested(configRecord(), VOICE_INPUT_DEVICE_KEY)
++}
++
++/** Configured speaker id, or '' for the system default. */
++export function voiceOutputDeviceId(): string {
++  return readNested(configRecord(), VOICE_OUTPUT_DEVICE_KEY)
++}
++
++/**
++ * `getUserMedia` audio constraints carrying the configured microphone.
++ *
++ * An `exact` constraint is deliberate: a silent fallback to the default microphone is the exact
++ * behaviour this setting exists to prevent. Callers should catch `OverconstrainedError` (the saved
++ * device is unplugged) and retry with the plain constraints.
++ */
++export function audioInputConstraints(base: MediaTrackConstraints = {}): MediaTrackConstraints {
++  const id = voiceInputDeviceId()
++
++  return id ? { ...base, deviceId: { exact: id } } : base
++}
++
++/** True when *error* means "the requested device is gone", not "you denied the mic". */
++export function isMissingDeviceError(error: unknown): boolean {
++  const name = (error as { name?: string } | null)?.name
++
++  return name === 'OverconstrainedError' || name === 'NotFoundError'
++}
++
++/** Point a playback element at the configured speaker. Best-effort: failures keep the default. */
++export async function applyAudioOutputDevice(audio: HTMLAudioElement): Promise<void> {
++  const id = voiceOutputDeviceId()
++  const setSink = (audio as HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> })
++    .setSinkId
++
++  if (!id || typeof setSink !== 'function') {
++    return
++  }
++
++  try {
++    await setSink.call(audio, id)
++  } catch (error) {
++    console.warn('[hermes] could not switch to the configured output device', error)
++  }
++}
++
++export interface VoiceDeviceLists {
++  inputs: MediaDeviceInfo[]
++  outputs: MediaDeviceInfo[]
++}
++
++/** Enumerate audio devices; label-less entries are normal before the mic permission is granted. */
++export async function listVoiceDevices(): Promise<VoiceDeviceLists> {
++  const media = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices
++
++  if (!media?.enumerateDevices) {
++    return { inputs: [], outputs: [] }
++  }
++
++  try {
++    const devices = await media.enumerateDevices()
++
++    return {
++      inputs: devices.filter(device => device.kind === 'audioinput'),
++      outputs: devices.filter(device => device.kind === 'audiooutput')
++    }
++  } catch {
++    return { inputs: [], outputs: [] }
++  }
++}
++
++/** Label for a device entry, falling back to its position when permissions hide labels. */
++export function deviceLabel(device: MediaDeviceInfo, index: number, kind: 'input' | 'output'): string {
++  const fallback = `${kind === 'input' ? 'Microphone' : 'Speaker'} ${index + 1}`
++
++  return device.label?.trim() || fallback
++}
+diff --git a/apps/desktop/src/lib/voice-playback.ts b/apps/desktop/src/lib/voice-playback.ts
+index 0efb99c631..023e0931bc 100644
+--- a/apps/desktop/src/lib/voice-playback.ts
++++ b/apps/desktop/src/lib/voice-playback.ts
+@@ -8,6 +8,7 @@ import {
+   synthesizeSpeechClientDirect
+ } from '@/lib/voice-client-direct'
+ import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
++import { applyAudioOutputDevice } from '@/lib/voice-devices'
+ import {
+   $voicePlayback,
+   setVoicePlaybackState,
+@@ -272,6 +273,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
+         try {
+           await new Promise<void>((resolve, reject) => {
+             const audio = new Audio(url)
++            void applyAudioOutputDevice(audio)
+             playing = audio
+             audio.addEventListener('ended', () => resolve(), { once: true })
+             audio.addEventListener('error', () => reject(new Error('Playback failed')), { once: true })
+@@ -580,6 +582,7 @@ async function playSpeechDataUrl(
+   }
+ 
+   const audio = new Audio(response.data_url)
++  void applyAudioOutputDevice(audio)
+   currentAudio = audio
+   setVoicePlaybackState(currentState('speaking', options, audio))
+ 

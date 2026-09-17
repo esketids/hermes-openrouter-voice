@@ -122,6 +122,25 @@ applier. Besides the rows themselves it adds **Preview buttons** on the voice an
 the voice dropdown **follow the selected model**, mirroring how the desktop already narrows OpenAI's
 voices.
 
+### Microphone and speaker pickers
+
+Two more rows come with the patch, under the voice-capture keys:
+
+| Row | Config key | What it does |
+|---|---|---|
+| Microphone | `voice.mic_device_id` | pins `getUserMedia` to that device, in both the recorder and the barge-in analyser |
+| Speaker | `voice.speaker_device_id` | routes playback through `setSinkId`, for the client-direct, relay and data-URL paths alike |
+
+"System default" (the empty value) is the shipped behaviour, so leaving them alone changes nothing.
+Two notes worth knowing:
+
+* These are **browser device ids** from `navigator.mediaDevices.enumerateDevices()`, which is a
+  different namespace from `wake_word.input_device` — that one is a **PortAudio** index/name used by
+  the Python side for wake-word capture. Setting one does not set the other.
+* A configured device that is no longer connected raises `OverconstrainedError`; recording then falls
+  back to the system default **and the row says so**, rather than silently switching. The device list
+  re-enumerates on `devicechange`, so plugging in a headset refreshes it without a reload.
+
 The Preview button speaks a sample using the settings in force at that moment (model + voice + speed)
 through the app's own playback ladder — client-direct synthesis where the profile has client-callable
 credentials, otherwise the gateway relay, which is the path that runs this plugin server-side and so
