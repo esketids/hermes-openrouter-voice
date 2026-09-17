@@ -1,0 +1,70 @@
+diff --git a/apps/desktop/src/app/settings/constants.ts b/apps/desktop/src/app/settings/constants.ts
+index 0a0c04b03c..80dc9a7f36 100644
+--- a/apps/desktop/src/app/settings/constants.ts
++++ b/apps/desktop/src/app/settings/constants.ts
+@@ -361,6 +361,30 @@ export const ENUM_OPTIONS: Record<string, string[]> = {
+   ],
+   'stt.openai.model': ['whisper-1', 'gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'gpt-transcribe'],
+   'stt.mistral.model': ['voxtral-mini-latest', 'voxtral-mini-2602'],
++  // OpenRouter transcription catalog — vendor-prefixed slugs, all 20 probed live 2026-09-14.
++  // Free-input (FREE_INPUT_KEYS): the live catalog moves faster than this list.
++  'stt.openrouter.model': [
++    'openai/whisper-large-v3',
++    'openai/whisper-large-v3-turbo',
++    'openai/whisper-1',
++    'openai/gpt-4o-transcribe',
++    'openai/gpt-4o-mini-transcribe',
++    'openai/gpt-transcribe',
++    'mistralai/voxtral-mini-transcribe',
++    'google/chirp-3',
++    'deepgram/nova-3',
++    'x-ai/grok-stt-1.0',
++    'qwen/qwen3-asr-flash-2026-02-10',
++    'microsoft/mai-transcribe-2',
++    'nvidia/parakeet-tdt-0.6b-v3',
++    'fish-audio/transcribe-1',
++    'meta/muse-voice-transcribe-1.0',
++    'mistralai/voxtral-small-24b-2507-stt',
++    'qwen/qwen3-asr-1.7b',
++    'qwen/qwen3-asr-0.6b',
++    'microsoft/mai-transcribe-1.5',
++    'nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b'
++  ],
+   'tts.openai.model': ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'],
+   'tts.elevenlabs.model_id': ['eleven_multilingual_v2', 'eleven_turbo_v2_5', 'eleven_flash_v2_5'],
+   // NeuTTS local inference device.
+@@ -391,12 +415,15 @@ export const FREE_INPUT_KEYS = new Set([
+   'tts.kittentts.voice',
+   'tts.piper.voice',
+   'tts.deepinfra.model',
+-  'tts.deepinfra.voice'
++  'tts.deepinfra.voice',
++  'stt.openrouter.model'
+ ])
+ 
+ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
+   model: 'Default Model',
+   modelContextLength: 'Context Window',
++  // Provider-scoped voice rows: the fallback label is prettyName(lastSegment) => a bare "Model".
++  'stt.openrouter.model': 'OpenRouter Model',
+   fallbackProviders: 'Fallback Models',
+   toolsets: 'Enabled Toolsets',
+   timezone: 'Timezone',
+@@ -572,6 +599,7 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
+ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
+   model: 'Used for new chats unless you pick a different model in the composer.',
+   modelContextLength: "Leave at 0 to use the selected model's detected context window.",
++  'stt.openrouter.model': 'Vendor-prefixed OpenRouter slug, e.g. openai/whisper-large-v3. Audited live: meta/muse-voice-transcribe-1.0 needs 16 or 24 kHz WAV.',
+   fallbackProviders: 'Backup provider:model entries to try if the default model fails.',
+   display: {
+     personality: 'Default assistant style for new sessions.',
+@@ -747,6 +775,9 @@ export const SECTIONS: DesktopConfigSection[] = [
+       'stt.enabled',
+       'stt.echo_transcripts',
+       'stt.provider',
++      // OpenRouter is a command provider (stt.providers.openrouter), not a built-in, so its model
++      // row is keyed on the selected provider name and gated by voiceFieldVisible().
++      'stt.openrouter.model',
+       'voice.auto_tts',
+       'tts.edge.voice',
+       'tts.openai.model',

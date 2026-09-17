@@ -102,6 +102,38 @@ hermes config set --force tts.providers.openrouter.command \
 hermes config set --force tts.providers.openrouter.voice_compatible true
 ```
 
+### The model row itself (optional patch)
+
+The provider **names** above appear in the dropdowns from config alone. The **model row** — the field
+with the 20-slug dropdown — is a different story, and it is worth knowing why before you file a bug
+against this plugin:
+
+```ts
+// apps/desktop/src/app/settings/constants.ts
+// The curated voice keys (Settings → Voice) are the single source of which
+// per-provider fields exist; both the Voice settings page and the
+// Capabilities TTS panel derive from it so the two surfaces never drift.
+const VOICE_KEYS = SECTIONS.find(s => s.id === 'voice')?.keys ?? []
+```
+
+That list is compiled into the desktop bundle, so neither a plugin nor a config entry can add a row to
+it — there is no dynamic, server-driven path for these fields. `gui/` ships the edit plus an idempotent
+applier:
+
+```bash
+~/.hermes/plugins/openrouter-voice/gui/apply-gui-rows.sh              # patch + repack
+~/.hermes/plugins/openrouter-voice/gui/apply-gui-rows.sh --no-pack    # patch only
+```
+
+Two caveats, both real:
+
+* It edits `apps/desktop/src/app/settings/constants.ts` in your Hermes checkout and runs
+  `npm run pack` (~5 min), which replaces the bundle under the running app — reload with ⌘R afterwards.
+* `hermes update` checks out `main` and rebuilds the desktop, which **removes the row again**. Re-run
+  the script after an update. The upstream fix is the schema+desktop change in
+  [#112122](https://github.com/NousResearch/hermes-agent/pull/112122) (STT) and
+  [#112126](https://github.com/NousResearch/hermes-agent/pull/112126) (TTS).
+
 Two things worth knowing about those commands:
 
 * `--force` is required. Without it Hermes prints *"use --force to write this path anyway"* and writes
@@ -150,6 +182,14 @@ tts_core.py      synthesis logic (no Hermes imports)
 tts.py           TTSProvider wrapper (raises on failure, voice_compatible)
 transcribe.py    STT command-provider shim (GUI selectability)
 speak.py         TTS command-provider shim (GUI selectability)
+gui/             optional patch for the Voice-tab model row (+ applier)
+tests/           stdlib unit tests for the audio normaliser
+```
+
+## Tests
+
+```bash
+python -m pytest tests/ -q      # audio normaliser: downmix, resample, idempotence
 ```
 
 The `*_core.py` modules deliberately import nothing from Hermes: the shims run outside the repo's
