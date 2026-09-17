@@ -12,8 +12,12 @@ from typing import Any, Optional
 from hermes_openrouter_voice_common import (
     DEFAULT_TTS_MODEL,
     DEFAULT_TTS_VOICE,
+    TTS_VOICES_BY_MODEL,
     resolve_tts_settings,
+    split_speed,
     synthesize_request,
+    time_stretch,
+    voices_for_model,
 )
 
 
@@ -32,6 +36,9 @@ def synthesize_to_file(
     Always requests mp3: that is what the shipped default was verified with, and models in the
     catalog disagree about other containers (``google/gemini-3.1-flash-tts-preview`` wants ``pcm``).
     A non-mp3 ``output_path`` therefore becomes ``<name>.mp3`` so the extension matches the bytes.
+
+    ``speed`` (0.25-4.0) is honoured on every model: natively where the provider supports it, and by
+    local ffmpeg time-stretch elsewhere — see ``SPEED_NATIVE_MODELS`` for the measured split.
     """
     settings = resolve_tts_settings(config)
 
@@ -41,17 +48,28 @@ def synthesize_to_file(
         # valid OpenRouter slug and would 400, so fall back to the default pair.
         chosen_model = DEFAULT_TTS_MODEL
     chosen_voice = (voice or settings["voice"] or DEFAULT_TTS_VOICE).strip()
-    if not voice and chosen_model == DEFAULT_TTS_MODEL and not settings["voice"]:
-        chosen_voice = chosen_voice or DEFAULT_TTS_VOICE
+    # A model that publishes no voices (the fish-audio family) speaks with the provider's default:
+    # the parameter has to be OMITTED, not filled in with another model's default voice.
+    if chosen_model in TTS_VOICES_BY_MODEL and not voices_for_model(chosen_model):
+        chosen_voice = ""
 
     speed_value: Any = speed if isinstance(speed, (int, float)) else settings["speed"]
+    try:
+        speed_value = max(0.25, min(4.0, float(speed_value)))
+    except (TypeError, ValueError):
+        speed_value = 1.0
+
+    # `speed` goes to the API only within the model's measured range; every remainder — a model
+    # that ignores the parameter (voxtral/orpheus/grok), one that rejects it (qwen: HTTP 400), or a
+    # rate outside its range (aura-2 above 1.5 is a 400) — is time-stretched locally instead.
+    native_speed, local_stretch = split_speed(chosen_model, speed_value)
 
     key = settings["api_key"]
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY is not set (env or ~/.hermes/.env)")
 
     audio = synthesize_request(
-        text, model=chosen_model, voice=chosen_voice, speed=speed_value,
+        text, model=chosen_model, voice=chosen_voice, speed=native_speed,
         base_url=settings["base_url"], key=key, instructions=instructions,
     )
     if not audio:
@@ -62,4 +80,10 @@ def synthesize_to_file(
         target = target.with_suffix(".mp3")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(audio)
+
+    if local_stretch != 1.0:
+        stretched = time_stretch(str(target), local_stretch)
+        if stretched != str(target):
+            target.write_bytes(pathlib.Path(stretched).read_bytes())
+
     return str(target)

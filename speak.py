@@ -4,11 +4,12 @@
 Exists so the name is selectable in the desktop Voice tab (see the plugin ``__init__`` for why a
 plugin-registered name is not). Imports nothing from Hermes: it runs outside the repo's ``sys.path``.
 
-usage: speak.py [--config PATH] <input_path|text> <output_path> [voice] [model]
+usage: speak.py [--config PATH] <input_path|text> <output_path> [voice] [model] [speed]
 
 Per ``tools/tts_command_provider.py`` the template supplies ``{input_path}``/``{text_path}`` (a file
 holding the text), ``{output_path}``, ``{voice}``, ``{model}``, ``{format}`` and ``{speed}``. The
-first argument is treated as a file when it exists, otherwise as the literal text.
+first argument is treated as a file when it exists, otherwise as the literal text. A missing or
+empty ``speed`` falls back to ``tts.openrouter.speed`` (then the global ``tts.speed``).
 """
 
 from __future__ import annotations
@@ -54,6 +55,11 @@ def main(argv: list) -> int:
     source, output_path = args[0], args[1]
     voice = args[2].strip() if len(args) > 2 and args[2].strip() else ""
     model = args[3].strip() if len(args) > 3 and args[3].strip() else ""
+    raw_speed = args[4].strip() if len(args) > 4 and args[4].strip() else ""
+    try:
+        speed = float(raw_speed) if raw_speed else None
+    except ValueError:
+        speed = None
 
     source_path = pathlib.Path(source).expanduser()
     text = source_path.read_text(encoding="utf-8") if source_path.is_file() else source
@@ -65,7 +71,7 @@ def main(argv: list) -> int:
     tts_core = _load("tts_core")
     try:
         written = tts_core.synthesize_to_file(
-            text, output_path, model=model, voice=voice, config=explicit_config,
+            text, output_path, model=model, voice=voice, speed=speed, config=explicit_config,
         )
     except Exception as exc:  # noqa: BLE001 - surfaced to the caller as a non-zero exit
         print(f"speak.py: {exc}", file=sys.stderr)

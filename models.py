@@ -18,12 +18,18 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import subprocess
 import sys
 import urllib.request
 from typing import Any
 
 _HERE = pathlib.Path(__file__).resolve().parent
 API = "https://openrouter.ai/api/v1/models"
+
+# One short clip per voice, cached: the API has no preview URLs, so samples are generated here.
+# The voice id is spoken first, which makes a montage self-labelling.
+SAMPLE_TEXT = "{voice}. This is a sample of my voice."
+SAMPLE_ROOT = pathlib.Path.home() / ".hermes" / "cache" / "openrouter-voice-samples"
 
 
 def _load(name: str) -> Any:
@@ -60,8 +66,71 @@ def _live_voices(key: str) -> dict:
     return {item.get("id", ""): item.get("supported_voices") or [] for item in data}
 
 
+def _samples(common: Any, argv: list) -> int:
+    """`--sample <model> [voice]`: write one clip per voice (cached) and optionally a montage."""
+    index = argv.index("--sample")
+    rest = [a for a in argv[index + 1:] if not a.startswith("--")]
+    if not rest:
+        print("usage: models.py --sample <model> [voice] [--phrase TEXT] [--force] [--montage]")
+        return 2
+    model = rest[0]
+    only_voice = rest[1] if len(rest) > 1 else ""
+
+    voices = list(common.voices_for_model(model))
+    if not voices:
+        print(f"{model} publishes no voices — it speaks with the provider's default voice")
+        return 1
+    if only_voice:
+        voices = [only_voice]
+
+    core = _load("tts_core")
+    phrase = ""
+    if "--phrase" in argv:
+        phrase_index = argv.index("--phrase")
+        if len(argv) > phrase_index + 1:
+            phrase = argv[phrase_index + 1]
+
+    out_dir = SAMPLE_ROOT / model.replace("/", "__")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    print(f"=== {model}: {len(voices)} voices -> {out_dir}")
+    for voice in voices:
+        target = out_dir / f"{voice.replace('/', '_')}.mp3"
+        if target.exists() and "--force" not in argv:
+            written.append(str(target))
+            print(f"  cached  {voice}")
+            continue
+        try:
+            path = core.synthesize_to_file(
+                phrase or SAMPLE_TEXT.format(voice=voice), str(target), model=model, voice=voice,
+            )
+            written.append(path)
+            print(f"  {pathlib.Path(path).stat().st_size:>7} bytes  {voice}")
+        except Exception as exc:  # noqa: BLE001 - keep going, one bad voice must not stop the rest
+            print(f"  FAILED  {voice}: {str(exc)[:100]}")
+
+    if "--montage" in argv and written:
+        ffmpeg = common.ffmpeg_path()
+        listing = out_dir / "montage.txt"
+        listing.write_text("".join(f"file '{path}'\n" for path in written))
+        montage = out_dir / f"{model.replace('/', '__')}-montage.mp3"
+        if not ffmpeg:
+            print("  montage needs ffmpeg (brew install ffmpeg) — samples are written individually")
+        else:
+            proc = subprocess.run(
+                [ffmpeg, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing),
+                 "-c", "copy", str(montage)], capture_output=True,
+            )
+            print(f"  montage: {montage}" if proc.returncode == 0
+                  else f"  montage failed: {proc.stderr.decode()[:120]}")
+    return 0
+
+
 def main(argv: list) -> int:
     common = _load("common")
+
+    if "--sample" in argv:
+        return _samples(common, argv)
     live = "--live" in argv
 
     shipped = {"transcription (stt)": list(common.STT_CATALOG), "speech (tts)": list(common.TTS_CATALOG)}

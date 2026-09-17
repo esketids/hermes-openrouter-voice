@@ -1,5 +1,5 @@
 diff --git a/apps/desktop/src/app/settings/constants.ts b/apps/desktop/src/app/settings/constants.ts
-index 0a0c04b03c..e8f3e259d1 100644
+index 0a0c04b03c..db3d74d61d 100644
 --- a/apps/desktop/src/app/settings/constants.ts
 +++ b/apps/desktop/src/app/settings/constants.ts
 @@ -361,6 +361,149 @@ export const ENUM_OPTIONS: Record<string, string[]> = {
@@ -577,7 +577,7 @@ index 0a0c04b03c..e8f3e259d1 100644
  export const FREE_INPUT_KEYS = new Set([
    'tts.edge.voice',
    'voice.gpt_live.voice',
-@@ -391,12 +952,19 @@ export const FREE_INPUT_KEYS = new Set([
+@@ -391,12 +952,20 @@ export const FREE_INPUT_KEYS = new Set([
    'tts.kittentts.voice',
    'tts.piper.voice',
    'tts.deepinfra.model',
@@ -595,20 +595,22 @@ index 0a0c04b03c..e8f3e259d1 100644
 +  'stt.openrouter.model': 'OpenRouter Model',
 +  'tts.openrouter.model': 'OpenRouter Voice Model',
 +  'tts.openrouter.voice': 'OpenRouter Voice',
++  'tts.openrouter.speed': 'OpenRouter Playback Speed',
    fallbackProviders: 'Fallback Models',
    toolsets: 'Enabled Toolsets',
    timezone: 'Timezone',
-@@ -572,6 +1140,9 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
+@@ -572,6 +1141,10 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
  export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
    model: 'Used for new chats unless you pick a different model in the composer.',
    modelContextLength: "Leave at 0 to use the selected model's detected context window.",
 +  'stt.openrouter.model': 'Vendor-prefixed OpenRouter slug, e.g. openai/whisper-large-v3. Audited live: meta/muse-voice-transcribe-1.0 needs 16 or 24 kHz WAV.',
 +  'tts.openrouter.model': 'Vendor-prefixed OpenRouter speech slug, e.g. deepgram/aura-2. Hexgrad Kokoro emits only the first sentence; Gemini TTS needs pcm.',
 +  'tts.openrouter.voice': 'Voice for the selected model — the list follows the model, since voices are model-specific.',
++  'tts.openrouter.speed': 'Playback speed. 0.7 = slower, 1.0 = normal, 1.5 = faster. Applied natively where the model supports it, otherwise by a local pitch-preserving time-stretch.',
    fallbackProviders: 'Backup provider:model entries to try if the default model fails.',
    display: {
      personality: 'Default assistant style for new sessions.',
-@@ -747,6 +1318,9 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -747,6 +1320,9 @@ export const SECTIONS: DesktopConfigSection[] = [
        'stt.enabled',
        'stt.echo_transcripts',
        'stt.provider',
@@ -618,7 +620,7 @@ index 0a0c04b03c..e8f3e259d1 100644
        'voice.auto_tts',
        'tts.edge.voice',
        'tts.openai.model',
-@@ -773,6 +1347,11 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -773,6 +1349,12 @@ export const SECTIONS: DesktopConfigSection[] = [
        'tts.piper.voice',
        'tts.deepinfra.model',
        'tts.deepinfra.voice',
@@ -627,6 +629,7 @@ index 0a0c04b03c..e8f3e259d1 100644
 +      // the voice suggestions to the selected model.
 +      'tts.openrouter.model',
 +      'tts.openrouter.voice',
++      'tts.openrouter.speed',
        'stt.local.model',
        'stt.local.language',
        'stt.openai.model',

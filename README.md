@@ -186,6 +186,36 @@ model, so the model field decides the valid voices:
 There is no voices endpoint — the sets above come from `supported_voices` on the models API. With the
 GUI patch applied, the voice dropdown follows the selected model instead of offering every voice.
 
+### Playback speed
+
+`tts.openrouter.speed` (or the global `tts.speed`) takes 0.25-4.0 and is honoured on **every** model:
+
+| Model | How the rate is applied |
+|---|---|
+| `deepgram/aura-2`, `minimax/*`, `microsoft/mai-voice-2`, `hexgrad/kokoro-82m` | natively, within the range the provider accepts (**aura-2: 0.7-1.5 only** — 1.6 is a 400) |
+| `qwen/*` | never sent — it rejects the parameter with HTTP 400 |
+| `voxtral`, `orpheus`, `grok`, `fish-audio`, anything unmeasured | local pitch-preserving time-stretch (`ffmpeg atempo`) |
+| any rate outside a model's native range | nearest in-range value to the API + the remainder stretched locally |
+
+Measured 2026-09-17: with `speed=1.5` the audio landed at 0.60-0.68 of the baseline wherever the API
+honours the parameter. Expect **±10-20 %**: providers pace themselves differently between runs (two
+identical `aura-2` calls differed by 12 %), and a slow rate at a range edge can overshoot. The local
+path needs ffmpeg (`brew install ffmpeg`); without it the rate is sent to the API only.
+
+### Voice samples
+
+The API publishes no preview URLs, so samples are generated (and cached) locally:
+
+```bash
+python models.py --sample microsoft/mai-voice-2              # one clip per voice
+python models.py --sample deepgram/aura-2 --montage          # + a single concatenated file
+python models.py --sample hexgrad/kokoro-82m af_heart --force
+```
+
+Each clip speaks its own voice id first (`"<voice>. This is a sample of my voice."`, override with
+`--phrase`), which makes a montage self-labelling. Output lands in
+`~/.hermes/cache/openrouter-voice-samples/<model>/`, and existing clips are reused unless `--force`.
+
 ## What the endpoint actually accepts (measured, not assumed)
 
 These cost real debugging time, so they are baked in:

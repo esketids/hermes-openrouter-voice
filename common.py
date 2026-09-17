@@ -37,6 +37,24 @@ DEFAULT_TTS_MODEL = os.environ.get("TTS_OPENROUTER_MODEL", "deepgram/aura-2")
 DEFAULT_TTS_VOICE = os.environ.get("TTS_OPENROUTER_VOICE", "aura-2-thalia-en")
 DEFAULT_TTS_BASE_URL = os.environ.get("TTS_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
+# Speed, measured live 2026-09-17 by comparing audio length at speed=1.5 against the default:
+#   * these honour it natively (ratio 0.60-0.66)
+#   * voxtral/orpheus/grok silently ignore it (ratio 0.89-0.98)
+#   * qwen rejects the parameter outright: HTTP 400 "does not support the speed parameter"
+# So `speed` is only sent to models measured to honour it; every other model gets the parameter
+# omitted and the audio time-stretched locally instead, which cannot 400 and cannot silently no-op.
+# Native ranges, probed 2026-09-17 by sending 0.25/0.5/0.7/1.0/1.5/1.6/2.0/3.0:
+#   deepgram/aura-2            accepts 0.7-1.5 only; 1.6 and 2.0 are HTTP 400
+#   minimax, mai-voice-2, kokoro accept 0.25-3.0
+# Anything outside a model's range is sent as the nearest in-range value with the remainder
+# time-stretched locally, so one control covers 0.25-4.0 without ever 400ing.
+NATIVE_SPEED_RANGES: Dict[str, tuple] = {
+    "deepgram/aura-2": (0.7, 1.5),
+    "minimax/speech-2.8-turbo": (0.25, 3.0),
+    "microsoft/mai-voice-2": (0.25, 3.0),
+    "hexgrad/kokoro-82m": (0.25, 3.0),
+}
+
 # Every transcription model on OpenRouter when this was written; feeds ``list_models()`` and the CLI
 # pickers, which take slugs verbatim.
 STT_CATALOG = (
@@ -828,6 +846,60 @@ def _request(url: str, data: bytes, headers: Dict[str, str], timeout: int = 180)
         raise RuntimeError(f"OpenRouter request failed: {exc.reason}") from exc
 
 
+def split_speed(model: str, rate: float) -> tuple:
+    """Split *rate* into ``(native_speed, local_stretch)``; ``native_speed`` is None when unused.
+
+    The product is the requested rate, so the caller only has to pass the native value to the API
+    and stretch the result by the local factor.
+    """
+    rate = max(0.25, min(4.0, rate))
+    if abs(rate - 1.0) < 0.01:
+        return None, 1.0
+    bounds = NATIVE_SPEED_RANGES.get(model)
+    if not bounds:
+        return None, rate
+    low, high = bounds
+    native = min(max(rate, low), high)
+    local = rate / native
+    return (native if abs(native - 1.0) > 0.01 else None,
+            local if abs(local - 1.0) > 0.01 else 1.0)
+
+
+def build_atempo_chain(rate: float) -> str:
+    """ffmpeg ``atempo`` filter chain for *rate* (one instance covers 0.5-2.0, so chain the rest)."""
+    parts: List[str] = []
+    remaining = max(0.25, min(4.0, rate))
+    while remaining > 2.0:
+        parts.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5:
+        parts.append("atempo=0.5")
+        remaining /= 0.5
+    if abs(remaining - 1.0) > 0.01:
+        parts.append(f"atempo={remaining:.4f}")
+    return ",".join(parts)
+
+
+def time_stretch(path: str, rate: float) -> str:
+    """Rewrite the audio at *rate* (pitch-preserving); the original path when ffmpeg is unavailable."""
+    if abs(rate - 1.0) < 0.01:
+        return path
+    ffmpeg = ffmpeg_path()
+    if not ffmpeg:
+        return path
+    chain = build_atempo_chain(rate)
+    if not chain:
+        return path
+    out = pathlib.Path(tempfile.mkdtemp()) / (pathlib.Path(path).stem + "-speed.mp3")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-loglevel", "error", "-i", path, "-filter:a", chain, str(out)],
+        capture_output=True,
+    )
+    if proc.returncode == 0 and out.exists() and out.stat().st_size > 0:
+        return str(out)
+    return path
+
+
 def transcribe_request(audio_path: str, *, model: str, language: str, base_url: str, key: str) -> str:
     """POST audio to ``/audio/transcriptions`` and return the transcript text."""
     payload, boundary = _multipart(
@@ -856,8 +928,11 @@ def synthesize_request(text: str, *, model: str, voice: str, speed: Any, base_ur
     ``response_format`` is left at mp3 deliberately: it is what the shipped default model was
     verified with, and some catalog models reject anything else (gemini wants ``pcm``).
     """
-    body: Dict[str, Any] = {"model": model, "input": text, "voice": voice,
-                            "response_format": response_format}
+    body: Dict[str, Any] = {"model": model, "input": text, "response_format": response_format}
+    if voice and voice.strip():
+        # Omitted, not empty: models that publish no voices speak with the provider default, and an
+        # empty string fails their schema validation.
+        body["voice"] = voice.strip()
     if isinstance(speed, (int, float)) and float(speed) != 1.0:
         body["speed"] = float(speed)
     if instructions:
