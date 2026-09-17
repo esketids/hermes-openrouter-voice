@@ -1,3 +1,105 @@
+diff --git a/apps/desktop/src/app/settings/config-field.preview-wiring.test.tsx b/apps/desktop/src/app/settings/config-field.preview-wiring.test.tsx
+new file mode 100644
+index 0000000000..fd538bf64e
+--- /dev/null
++++ b/apps/desktop/src/app/settings/config-field.preview-wiring.test.tsx
+@@ -0,0 +1,55 @@
++import { cleanup, render, screen } from '@testing-library/react'
++import { afterEach, describe, expect, it, vi } from 'vitest'
++
++// Keep the row shell out of the way: this test is about which rows get the audition button.
++vi.mock('./primitives', () => ({
++  ListRow: ({ action, title }: { action?: unknown; title?: string }) => (
++    <div>
++      <span>{title}</span>
++      {action as never}
++    </div>
++  )
++}))
++
++const directTtsConfig = vi.fn().mockResolvedValue(null)
++
++vi.mock('@/lib/voice-client-direct', () => ({
++  clearVoiceClientConfigCache: vi.fn(),
++  directTtsConfig: () => directTtsConfig()
++}))
++
++vi.mock('@/lib/voice-playback', () => ({ playSpeechText: vi.fn(), stopVoicePlayback: vi.fn() }))
++
++import { ConfigField } from './config-field'
++
++const renderField = (schemaKey: string) =>
++  render(
++    <ConfigField
++      onChange={() => {}}
++      schema={{ description: '', type: 'string' } as never}
++      schemaKey={schemaKey}
++      value="aura-2-thalia-en"
++    />
++  )
++
++afterEach(() => cleanup())
++
++describe('ConfigField audition wiring', () => {
++  it('puts a Preview button on the OpenRouter voice row', () => {
++    renderField('tts.openrouter.voice')
++    expect(screen.getByRole('button').textContent).toContain('Preview')
++  })
++
++  it('puts one on the speed row too, so a rate can be heard', () => {
++    renderField('tts.openrouter.speed')
++    expect(screen.getByRole('button').textContent).toContain('Preview')
++  })
++
++  it('leaves every other row alone', () => {
++    for (const key of ['tts.openrouter.model', 'tts.openai.voice', 'stt.openrouter.model', 'tts.provider']) {
++      cleanup()
++      renderField(key)
++      expect(screen.queryByRole('button')).toBeNull()
++    }
++  })
++})
+diff --git a/apps/desktop/src/app/settings/config-field.tsx b/apps/desktop/src/app/settings/config-field.tsx
+index 43d713ef6a..9d73922779 100644
+--- a/apps/desktop/src/app/settings/config-field.tsx
++++ b/apps/desktop/src/app/settings/config-field.tsx
+@@ -15,6 +15,12 @@ import { FallbackModelsField } from './fallback-models-field'
+ import { fieldCopyForSchemaKey } from './field-copy'
+ import { ListRow } from './primitives'
+ import { SearchableSelect } from './searchable-select'
++import { VoicePreviewButton } from './voice-preview-button'
++
++// Rows whose value is audible: the local OpenRouter patch puts an audition button beside them, so a
++// voice or a playback rate can be checked without leaving Settings (it previews the CURRENT
++// model + voice + speed, including values the autosave has just written).
++const AUDITION_KEYS = new Set(['tts.openrouter.voice', 'tts.openrouter.speed'])
+ 
+ /**
+  * One generic config row: label + description resolved from the i18n field
+@@ -78,7 +84,22 @@ export function ConfigField({
+   // point at one setting (`[data-tour="field-model"]`) without hunting through
+   // the section for an nth-child path. See lib/tour.
+   const row = (action: ReactNode, wide = false) => (
+-    <ListRow action={action} data-tour={`field-${schemaKey}`} description={descriptionNode} title={label} wide={wide} />
++    <ListRow
++      action={
++        AUDITION_KEYS.has(schemaKey) ? (
++          <div className="flex items-center justify-end gap-2">
++            {action}
++            <VoicePreviewButton />
++          </div>
++        ) : (
++          action
++        )
++      }
++      data-tour={`field-${schemaKey}`}
++      description={descriptionNode}
++      title={label}
++      wide={wide}
++    />
+   )
+ 
+   // `fallback_providers` is a list of {provider, model} objects; the generic
 diff --git a/apps/desktop/src/app/settings/constants.ts b/apps/desktop/src/app/settings/constants.ts
 index 0a0c04b03c..db3d74d61d 100644
 --- a/apps/desktop/src/app/settings/constants.ts
@@ -674,3 +776,184 @@ index b51162f854..cc4d4d8313 100644
    if (!opts) {
      return undefined
    }
+diff --git a/apps/desktop/src/app/settings/voice-preview-button.test.tsx b/apps/desktop/src/app/settings/voice-preview-button.test.tsx
+new file mode 100644
+index 0000000000..0b258bbcba
+--- /dev/null
++++ b/apps/desktop/src/app/settings/voice-preview-button.test.tsx
+@@ -0,0 +1,97 @@
++import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
++import { afterEach, describe, expect, it, vi } from 'vitest'
++
++import { setVoicePlaybackState } from '@/store/voice-playback'
++import type { VoicePlaybackSource } from '@/store/voice-playback'
++
++const directTtsConfig = vi.fn()
++const clearVoiceClientConfigCache = vi.fn()
++const playSpeechText = vi.fn()
++const stopVoicePlayback = vi.fn()
++
++vi.mock('@/lib/voice-client-direct', () => ({
++  clearVoiceClientConfigCache: () => clearVoiceClientConfigCache(),
++  directTtsConfig: () => directTtsConfig()
++}))
++
++vi.mock('@/lib/voice-playback', () => ({
++  playSpeechText: (...args: unknown[]) => playSpeechText(...args),
++  stopVoicePlayback: () => stopVoicePlayback()
++}))
++
++import { VoicePreviewButton } from './voice-preview-button'
++
++function idle() {
++  setVoicePlaybackState({ audioElement: null, messageId: null, sequence: 0, source: null, status: 'idle' })
++}
++
++afterEach(() => {
++  cleanup()
++  idle()
++  vi.clearAllMocks()
++})
++
++describe('VoicePreviewButton', () => {
++  it('drops the cached config, then speaks the resolved voice by name', async () => {
++    directTtsConfig.mockResolvedValue({ voice: 'af_heart' })
++    playSpeechText.mockResolvedValue(true)
++
++    render(<VoicePreviewButton />)
++    fireEvent.click(screen.getByRole('button'))
++
++    await waitFor(() => expect(playSpeechText).toHaveBeenCalledTimes(1))
++
++    // the 60s config cache must not answer with the previous model/voice/speed
++    expect(clearVoiceClientConfigCache).toHaveBeenCalledTimes(1)
++    expect(clearVoiceClientConfigCache.mock.invocationCallOrder[0])
++      .toBeLessThan(directTtsConfig.mock.invocationCallOrder[0])
++
++    const [text, options] = playSpeechText.mock.calls[0] as [string, { messageId: null; source: VoicePlaybackSource }]
++    expect(text).toBe('af_heart. This is a sample of my voice.')
++    expect(options.source).toBe('read-aloud')
++    expect(options.messageId).toBeNull()
++  })
++
++  it('falls back to a generic sample when no direct config is available', async () => {
++    directTtsConfig.mockResolvedValue(null)
++    playSpeechText.mockResolvedValue(true)
++
++    render(<VoicePreviewButton />)
++    fireEvent.click(screen.getByRole('button'))
++
++    await waitFor(() => expect(playSpeechText).toHaveBeenCalledTimes(1))
++    expect(playSpeechText.mock.calls[0][0]).toBe('This is a sample of my voice.')
++  })
++
++  it('reports when nothing could play the sample', async () => {
++    directTtsConfig.mockResolvedValue(null)
++    playSpeechText.mockResolvedValue(false)
++
++    render(<VoicePreviewButton />)
++    fireEvent.click(screen.getByRole('button'))
++
++    expect(await screen.findByText(/No speech path available/)).toBeTruthy()
++  })
++
++  it('surfaces a provider error instead of failing silently', async () => {
++    directTtsConfig.mockResolvedValue({ voice: 'af_heart' })
++    playSpeechText.mockRejectedValue(new Error('OpenRouter TTS error (HTTP 400): nope'))
++
++    render(<VoicePreviewButton />)
++    fireEvent.click(screen.getByRole('button'))
++
++    expect(await screen.findByText(/HTTP 400/)).toBeTruthy()
++  })
++
++  it('offers Stop while playback is active and stops on click', () => {
++    setVoicePlaybackState({ audioElement: null, messageId: null, sequence: 1, source: 'read-aloud', status: 'speaking' })
++
++    render(<VoicePreviewButton />)
++    const button = screen.getByRole('button')
++    expect(button.textContent).toContain('Stop')
++
++    fireEvent.click(button)
++    expect(stopVoicePlayback).toHaveBeenCalledTimes(1)
++    expect(playSpeechText).not.toHaveBeenCalled()
++  })
++})
+diff --git a/apps/desktop/src/app/settings/voice-preview-button.tsx b/apps/desktop/src/app/settings/voice-preview-button.tsx
+new file mode 100644
+index 0000000000..ae2c5c7173
+--- /dev/null
++++ b/apps/desktop/src/app/settings/voice-preview-button.tsx
+@@ -0,0 +1,72 @@
++import { useStore } from '@nanostores/react'
++import { useState } from 'react'
++
++import { Button } from '@/components/ui/button'
++import { clearVoiceClientConfigCache, directTtsConfig } from '@/lib/voice-client-direct'
++import { playSpeechText, stopVoicePlayback } from '@/lib/voice-playback'
++import { $voicePlayback } from '@/store/voice-playback'
++
++/**
++ * Audition button for the OpenRouter voice rows (part of the local GUI patch).
++ *
++ * Plays a short sample using whatever is configured *right now* — model, voice and speed — through
++ * the app's own playback ladder: client-direct synthesis when the profile has client-callable TTS
++ * credentials, otherwise the gateway relay. The relay is the interesting path here: it runs the
++ * OpenRouter command provider server-side, so the measured speed handling applies (native parameter
++ * inside the model's range, local pitch-preserving stretch outside it).
++ *
++ * The voice-config cache is dropped first. It is TTL'd at 60 s, and a preview should reflect the
++ * model/voice/speed you just picked, not the values cached a minute ago.
++ */
++const SAMPLE = 'This is a sample of my voice.'
++
++export function VoicePreviewButton() {
++  const playback = useStore($voicePlayback)
++  const [busy, setBusy] = useState(false)
++  const [error, setError] = useState('')
++  const playing = playback.status !== 'idle'
++
++  const toggle = async () => {
++    if (playing) {
++      stopVoicePlayback()
++      return
++    }
++
++    setError('')
++    setBusy(true)
++
++    try {
++      clearVoiceClientConfigCache()
++      // Naming the voice in the sample makes a montage of them self-labelling; the resolved config
++      // is the only place the effective voice id is known (the field may hold an empty or a
++      // model-specific value).
++      const config = await directTtsConfig().catch(() => null)
++      const voice = config?.voice?.trim()
++      const text = voice ? `${voice}. ${SAMPLE}` : SAMPLE
++      const played = await playSpeechText(text, { messageId: null, source: 'read-aloud' })
++
++      if (!played) {
++        setError('No speech path available — check the provider credentials.')
++      }
++    } catch (err) {
++      setError(err instanceof Error ? err.message.slice(0, 120) : 'Preview failed')
++    } finally {
++      setBusy(false)
++    }
++  }
++
++  return (
++    <div className="flex flex-col items-end gap-1">
++      <Button
++        disabled={busy}
++        onClick={() => void toggle()}
++        size="sm"
++        title="Play a sample with the selected model, voice and speed"
++        variant="secondary"
++      >
++        {playing ? 'Stop' : busy ? 'Preparing…' : 'Preview'}
++      </Button>
++      {error ? <span className="max-w-56 text-right text-xs text-muted-foreground">{error}</span> : null}
++    </div>
++  )
++}

@@ -25,7 +25,7 @@ PACK=1
 [ -f "$CONSTANTS" ] || { echo "missing $CONSTANTS" >&2; exit 2; }
 
 if grep -q "'stt.openrouter.model'" "$CONSTANTS"; then
-  echo "already applied — the Voice tab will show the OpenRouter Model row after a repack"
+  echo "already applied — the Voice tab shows the OpenRouter rows and their Preview buttons after a repack"
 else
   echo "applying gui-rows.patch to $HERMES_REPO ..."
   if ! git -C "$HERMES_REPO" apply "$PATCH_DIR/gui-rows.patch"; then
@@ -39,4 +39,6 @@ if [ "$PACK" = "1" ]; then
   echo "repacking the desktop (several minutes; reload the app afterwards with ⌘R) ..."
   ( cd "$HERMES_REPO/apps/desktop" && npm run pack )
   echo "done — reload the app (⌘R) to pick up the new bundle"
+  echo "     Voice tab: OpenRouter model / voice / speed rows, each with a Preview button that"
+  echo "     speaks a sample using the settings you have right now (model + voice + speed)."
 fi

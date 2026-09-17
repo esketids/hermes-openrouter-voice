@@ -117,9 +117,17 @@ const VOICE_KEYS = SECTIONS.find(s => s.id === 'voice')?.keys ?? []
 ```
 
 That list is compiled into the desktop bundle, so neither a plugin nor a config entry can add a row to
-it — there is no dynamic, server-driven path for these fields. `gui/` ships the edit (both files) plus
-an idempotent applier. As well as the two rows it adds, it makes the voice dropdown **follow the
-selected model**, mirroring how the desktop already narrows OpenAI's voices:
+it — there is no dynamic, server-driven path for these fields. `gui/` ships the edit plus an idempotent
+applier. Besides the rows themselves it adds **Preview buttons** on the voice and speed rows, and makes
+the voice dropdown **follow the selected model**, mirroring how the desktop already narrows OpenAI's
+voices.
+
+The Preview button speaks a sample using the settings in force at that moment (model + voice + speed)
+through the app's own playback ladder — client-direct synthesis where the profile has client-callable
+credentials, otherwise the gateway relay, which is the path that runs this plugin server-side and so
+applies the measured speed handling (native parameter inside a model's range, local time-stretch
+outside it). It drops the 60-second voice-config cache first, so a model/voice/speed you just typed is
+what you hear.
 
 ```bash
 ~/.hermes/plugins/openrouter-voice/gui/apply-gui-rows.sh              # patch + repack
