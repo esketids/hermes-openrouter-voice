@@ -20,6 +20,7 @@ from agent.tts_provider import DEFAULT_OUTPUT_FORMAT, TTSProvider
 from hermes_openrouter_voice_common import (
     DEFAULT_TTS_MODEL,
     DEFAULT_TTS_VOICE,
+    TTS_CATALOG,
     TTS_VOICES,
     api_key,
 )
@@ -45,6 +46,9 @@ class OpenRouterTTSProvider(TTSProvider):
 
     def default_voice(self) -> Optional[str]:
         return DEFAULT_TTS_VOICE
+
+    def list_models(self) -> List[Dict[str, Any]]:
+        return [{"id": slug, "name": slug, "provider": "openrouter"} for slug in TTS_CATALOG]
 
     def default_model(self) -> Optional[str]:
         return DEFAULT_TTS_MODEL

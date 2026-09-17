@@ -102,7 +102,7 @@ hermes config set --force tts.providers.openrouter.command \
 hermes config set --force tts.providers.openrouter.voice_compatible true
 ```
 
-### The model row itself (optional patch)
+### The model + voice rows (optional patch)
 
 The provider **names** above appear in the dropdowns from config alone. The **model row** — the field
 with the 20-slug dropdown — is a different story, and it is worth knowing why before you file a bug
@@ -117,8 +117,9 @@ const VOICE_KEYS = SECTIONS.find(s => s.id === 'voice')?.keys ?? []
 ```
 
 That list is compiled into the desktop bundle, so neither a plugin nor a config entry can add a row to
-it — there is no dynamic, server-driven path for these fields. `gui/` ships the edit plus an idempotent
-applier:
+it — there is no dynamic, server-driven path for these fields. `gui/` ships the edit (both files) plus
+an idempotent applier. As well as the two rows it adds, it makes the voice dropdown **follow the
+selected model**, mirroring how the desktop already narrows OpenAI's voices:
 
 ```bash
 ~/.hermes/plugins/openrouter-voice/gui/apply-gui-rows.sh              # patch + repack
@@ -156,6 +157,35 @@ echo "round trip test" > /tmp/t.txt
 $PY ~/.hermes/plugins/openrouter-voice/speak.py --config ~/.hermes/config.yaml /tmp/t.txt /tmp/out.mp3
 ```
 
+## Models and voices
+
+```bash
+python models.py                       # the shipped catalogs (no network)
+python models.py --voices              # every model's voice set
+python models.py --voices hexgrad/kokoro-82m
+python models.py --live                # diff the shipped lists against the API
+```
+
+| Direction | Models shipped | Where the list comes from |
+|---|---|---|
+| `stt.openrouter.model` | **21** transcription models | `GET /api/v1/models?output_modalities=transcription` |
+| `tts.openrouter.model` | **18** speech models | `GET /api/v1/models?output_modalities=speech` |
+| `tts.openrouter.voice` | **361** voices across 16 models | each model's `supported_voices` |
+
+**Voices are model-specific** — the endpoint rejects a mismatched pair with a 400 that names the
+model, so the model field decides the valid voices:
+
+* `deepgram/aura-2` → 90 voices (`aura-2-thalia-en`, …)
+* `hexgrad/kokoro-82m` → 54 (`af_heart`, `af_bella`, …) — note this model emits **only the first
+  sentence** of longer input
+* `minimax/speech-2.8-*` → 45, `mistralai/voxtral-mini-tts-2603` → 30 (`en_paul_neutral`, …)
+* `microsoft/mai-voice-2` → 4 (`en-US-Harper:MAI-Voice-2`, …)
+* `fish-audio/*` → **none published**; those models speak with the provider's default voice, so leave
+  the field empty (the API accepts the request without `voice`)
+
+There is no voices endpoint — the sets above come from `supported_voices` on the models API. With the
+GUI patch applied, the voice dropdown follows the selected model instead of offering every voice.
+
 ## What the endpoint actually accepts (measured, not assumed)
 
 These cost real debugging time, so they are baked in:
@@ -182,7 +212,8 @@ tts_core.py      synthesis logic (no Hermes imports)
 tts.py           TTSProvider wrapper (raises on failure, voice_compatible)
 transcribe.py    STT command-provider shim (GUI selectability)
 speak.py         TTS command-provider shim (GUI selectability)
-gui/             optional patch for the Voice-tab model row (+ applier)
+models.py        catalog/voice listing (`--voices`, `--live`)
+gui/             optional patch for the Voice-tab model + voice rows (+ applier)
 tests/           stdlib unit tests for the audio normaliser
 ```
 
