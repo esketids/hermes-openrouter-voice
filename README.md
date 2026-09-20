@@ -117,10 +117,20 @@ const VOICE_KEYS = SECTIONS.find(s => s.id === 'voice')?.keys ?? []
 ```
 
 That list is compiled into the desktop bundle, so neither a plugin nor a config entry can add a row to
-it — there is no dynamic, server-driven path for these fields. `gui/` ships the edit plus an idempotent
-applier. Besides the rows themselves it adds **Preview buttons** on the voice and speed rows, and makes
-the voice dropdown **follow the selected model**, mirroring how the desktop already narrows OpenAI's
-voices.
+it — there is no dynamic, server-driven path for these fields, and the desktop plugin SDK has no
+settings area to contribute one through (`src/contrib/types.ts` areas: layouts, panes, routes,
+statusBar, titleBar). The rows therefore ship as a patch against the desktop checkout — **not in this
+repo's tree**. A catalog entry may not carry an app patch as a distribution channel: several listed
+plugins patching `apps/desktop` would collide, and every core release would invalidate them.
+
+Where it lives instead: branch **`gui-rows`** of this repo, and a copy on each machine that uses it at
+`~/.hermes/patches/openrouter-voice-gui/` (the patch plus the idempotent applier). Besides the desktop
+files the patch seeds `voice.mic_device_id` / `voice.speaker_device_id` in `hermes_cli/config_defaults.py`:
+`sectionFieldEntries` drops a row whose key is in neither the served schema nor the config, so a picker
+listed in `SECTIONS` alone would never appear. The durable route
+upstream is a PR against `apps/desktop`. Besides the rows themselves the patch adds **Preview buttons**
+on the voice and speed rows, and makes the voice dropdown **follow the selected model**, mirroring how
+the desktop already narrows OpenAI's voices.
 
 ### Microphone and speaker pickers
 
@@ -149,8 +159,8 @@ outside it). It drops the 60-second voice-config cache first, so a model/voice/s
 what you hear.
 
 ```bash
-~/.hermes/plugins/openrouter-voice/gui/apply-gui-rows.sh              # patch + repack
-~/.hermes/plugins/openrouter-voice/gui/apply-gui-rows.sh --no-pack    # patch only
+~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh               # patch + repack
+~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh --no-pack     # patch only
 ```
 
 Two caveats, both real:
@@ -270,7 +280,6 @@ tts.py           TTSProvider wrapper (raises on failure, voice_compatible)
 transcribe.py    STT command-provider shim (GUI selectability)
 speak.py         TTS command-provider shim (GUI selectability)
 models.py        catalog/voice listing (`--voices`, `--live`)
-gui/             optional patch for the Voice-tab model + voice rows (+ applier)
 tests/           stdlib unit tests for the audio normaliser
 ```
 
