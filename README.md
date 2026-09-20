@@ -124,7 +124,10 @@ repo's tree**. A catalog entry may not carry an app patch as a distribution chan
 plugins patching `apps/desktop` would collide, and every core release would invalidate them.
 
 Where it lives instead: branch **`gui-rows`** of this repo, and a copy on each machine that uses it at
-`~/.hermes/patches/openrouter-voice-gui/` (the patch plus the idempotent applier). Besides the desktop
+`~/.hermes/patches/openrouter-voice-gui/` (the patch plus the idempotent applier). The patch is cut
+against one commit, and upstream edits these same files most releases (e.g. the Voice picker rows), so a
+moved base makes it fail **loudly** rather than half-apply — the applier prints the base and the current
+HEAD and exits non-zero. Re-cut the patch after an update instead of applying it by hand. Besides the desktop
 files the patch seeds `voice.mic_device_id` / `voice.speaker_device_id` in `hermes_cli/config_defaults.py`:
 `sectionFieldEntries` drops a row whose key is in neither the served schema nor the config, so a picker
 listed in `SECTIONS` alone would never appear. The durable route
@@ -148,8 +151,12 @@ Two notes worth knowing:
   different namespace from `wake_word.input_device` — that one is a **PortAudio** index/name used by
   the Python side for wake-word capture. Setting one does not set the other.
 * A configured device that is no longer connected raises `OverconstrainedError`; recording then falls
-  back to the system default **and the row says so**, rather than silently switching. The device list
+  back to the system default **and the row says so**, rather than switching silently. The device list
   re-enumerates on `devicechange`, so plugging in a headset refreshes it without a reload.
+* The rows need the **served** schema, which merges `DEFAULT_CONFIG` at process import
+  (`web_server_config.py` → `_build_schema_from_config(DEFAULT_CONFIG)`). A backend started before the
+  two keys were seeded will not advertise them, so **restart the app** (not just reload) after applying
+  the patch — and per profile, since each profile runs its own backend.
 
 The Preview button speaks a sample using the settings in force at that moment (model + voice + speed)
 through the app's own playback ladder — client-direct synthesis where the profile has client-callable
