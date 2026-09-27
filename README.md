@@ -72,6 +72,20 @@ must be told which config to read.
 the voice and speed rows (speaks a sample using the settings in force at that moment), makes the voice
 list **follow the selected model**, and adds the **microphone / speaker device pickers**.
 
+Each row lands in the subpage its key belongs to (routing is by key prefix), so nothing piles up in one
+pane:
+
+| Row | Subpage in Settings → Voice |
+|---|---|
+| **Microphone**, **Speaker** | the capture subpage, beside "Max recording duration" and "Client-direct voice" |
+| **OpenRouter Model** (STT) | **Transcription** |
+| **OpenRouter Voice Model**, **Voice**, **Playback Speed** (TTS) | **Speech** |
+
+Those two device rows must be listed in the `voice` subpage's `fields` as well: a row with no subpage
+owner only renders when the section's top level is shown, so it would be invisible during subpage
+navigation — the app's own test (`routes every curated field … to its owning child`) fails on exactly
+that, which is how this was caught.
+
 The rows live in a bundle-compiled list (`SECTIONS` in `apps/desktop/src/app/settings/constants.ts`), so
 no plugin or config entry can add one — a plugin contributes Python providers, not UI. The patch is kept
 **out of this repo's tree** (a catalog entry may not ship a patch for the app) and lives on branch
