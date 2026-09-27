@@ -1,16 +1,16 @@
 diff --git a/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts b/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
-index c560ef9ad2..68638c473c 100644
+index 19d85469db..a9a420a41f 100644
 --- a/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
 +++ b/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
-@@ -1,5 +1,7 @@
+@@ -1,6 +1,7 @@
  import { useEffect, useRef, useState } from 'react'
  
+ import { closeMeterContext, meterContextsClosed } from '@/lib/mic-meter-context'
 +import { audioInputConstraints, isMissingDeviceError } from '@/lib/voice-devices'
-+
+ 
  type BrowserAudioContext = typeof AudioContext
  
- export interface MicRecorderOptions {
-@@ -192,9 +194,22 @@ export function useMicRecorder(copy: MicRecorderErrorCopy): {
+@@ -250,9 +251,22 @@ export function useMicRecorder(copy: MicRecorderErrorCopy): {
      let stream: MediaStream
  
      try {
@@ -98,12 +98,12 @@ index 0000000000..fd538bf64e
 +  })
 +})
 diff --git a/apps/desktop/src/app/settings/config-field.tsx b/apps/desktop/src/app/settings/config-field.tsx
-index 43d713ef6a..eb8f10b3d6 100644
+index 6681811706..ad9c1e7bfd 100644
 --- a/apps/desktop/src/app/settings/config-field.tsx
 +++ b/apps/desktop/src/app/settings/config-field.tsx
-@@ -15,6 +15,17 @@ import { FallbackModelsField } from './fallback-models-field'
+@@ -14,6 +14,17 @@ import { FallbackModelsField } from './fallback-models-field'
  import { fieldCopyForSchemaKey } from './field-copy'
- import { ListRow } from './primitives'
+ import { ListRow, ToggleRow } from './primitives'
  import { SearchableSelect } from './searchable-select'
 +import { VoiceDevicePicker } from './voice-device-picker'
 +import { VoicePreviewButton } from './voice-preview-button'
@@ -119,11 +119,11 @@ index 43d713ef6a..eb8f10b3d6 100644
  
  /**
   * One generic config row: label + description resolved from the i18n field
-@@ -78,7 +89,22 @@ export function ConfigField({
-   // point at one setting (`[data-tour="field-model"]`) without hunting through
-   // the section for an nth-child path. See lib/tour.
-   const row = (action: ReactNode, wide = false) => (
--    <ListRow action={action} data-tour={`field-${schemaKey}`} description={descriptionNode} title={label} wide={wide} />
+@@ -83,7 +94,21 @@ export function ConfigField({
+   const dataTour = `field-${schemaKey}`
+ 
+   const row = (action: ReactNode) => (
+-    <ListRow action={action} data-tour={dataTour} description={descriptionNode} title={label} />
 +    <ListRow
 +      action={
 +        AUDITION_KEYS.has(schemaKey) ? (
@@ -135,16 +135,15 @@ index 43d713ef6a..eb8f10b3d6 100644
 +          action
 +        )
 +      }
-+      data-tour={`field-${schemaKey}`}
++      data-tour={dataTour}
 +      description={descriptionNode}
 +      title={label}
-+      wide={wide}
 +    />
    )
  
-   // `fallback_providers` is a list of {provider, model} objects; the generic
-@@ -88,6 +114,16 @@ export function ConfigField({
-     return row(<FallbackModelsField onChange={onChange} value={value} />, true)
+   // Editors too big for the control column (textareas, structured lists) take
+@@ -105,6 +130,16 @@ export function ConfigField({
+     return wideRow(<FallbackModelsField onChange={onChange} value={value} />)
    }
  
 +  if (DEVICE_KEYS.has(schemaKey)) {
@@ -158,10 +157,29 @@ index 43d713ef6a..eb8f10b3d6 100644
 +  }
 +
    if (schema.type === 'boolean') {
-     return row(
-       <div className="flex items-center justify-end">
+     return (
+       <ToggleRow
+diff --git a/apps/desktop/src/app/settings/config-subpages.ts b/apps/desktop/src/app/settings/config-subpages.ts
+index fe6f9d335c..df63976045 100644
+--- a/apps/desktop/src/app/settings/config-subpages.ts
++++ b/apps/desktop/src/app/settings/config-subpages.ts
+@@ -72,7 +72,13 @@ const CONFIG_SUBPAGE_DEFINITIONS: Record<string, ConfigSubpageDefinition[]> = {
+     {
+       id: 'conversation',
+       labelKey: 'voiceConversation',
+-      fields: ['voice.voice_chat_mode', 'voice.max_recording_seconds', 'voice.client_direct'],
++      fields: [
++        'voice.voice_chat_mode',
++        'voice.max_recording_seconds',
++        'voice.client_direct',
++        'voice.mic_device_id',
++        'voice.speaker_device_id'
++      ],
+       prefixes: ['voice.gpt_live.']
+     },
+     { id: 'transcription', labelKey: 'voiceTranscription', prefixes: ['stt.'] },
 diff --git a/apps/desktop/src/app/settings/constants.ts b/apps/desktop/src/app/settings/constants.ts
-index 28930d893d..a89b661790 100644
+index 4dd955dddb..cc79ad5b32 100644
 --- a/apps/desktop/src/app/settings/constants.ts
 +++ b/apps/desktop/src/app/settings/constants.ts
 @@ -361,6 +361,149 @@ export const ENUM_OPTIONS: Record<string, string[]> = {
@@ -765,7 +783,7 @@ index 28930d893d..a89b661790 100644
    fallbackProviders: 'Fallback Models',
    toolsets: 'Enabled Toolsets',
    timezone: 'Timezone',
-@@ -588,6 +1161,12 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
+@@ -587,6 +1160,12 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
    model: 'Used for new chats unless you pick a different model in the composer.',
    modelContextLength:
      "Overrides the detected context window of the MAIN chat model only (tokens). Leave at 0 to use the selected model's detected value. Does not affect auxiliary/MoA models.",
@@ -778,7 +796,7 @@ index 28930d893d..a89b661790 100644
    fallbackProviders: 'Backup provider:model entries to try if the default model fails.',
    display: {
      personality: 'Default assistant style for new sessions.',
-@@ -770,6 +1349,9 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -769,6 +1348,9 @@ export const SECTIONS: DesktopConfigSection[] = [
        'stt.enabled',
        'stt.echo_transcripts',
        'stt.provider',
@@ -788,7 +806,7 @@ index 28930d893d..a89b661790 100644
        'voice.auto_tts',
        'tts.edge.voice',
        'tts.openai.model',
-@@ -796,6 +1378,12 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -795,6 +1377,12 @@ export const SECTIONS: DesktopConfigSection[] = [
        'tts.piper.voice',
        'tts.deepinfra.model',
        'tts.deepinfra.voice',
@@ -801,10 +819,10 @@ index 28930d893d..a89b661790 100644
        'stt.local.model',
        'stt.local.language',
        'stt.openai.model',
-@@ -806,6 +1394,10 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -804,6 +1392,10 @@ export const SECTIONS: DesktopConfigSection[] = [
+       'stt.elevenlabs.language_code',
        'stt.elevenlabs.tag_audio_events',
        'stt.elevenlabs.diarize',
-       'voice.record_key',
 +      // Device rows (browser device ids; empty = system default). Grouped with the other voice
 +      // capture keys, and rendered by voice-device-picker.tsx rather than the generic text box.
 +      'voice.mic_device_id',
@@ -1231,22 +1249,21 @@ index 0000000000..1b9bfbd1ba
 +  )
 +}
 diff --git a/apps/desktop/src/lib/voice-barge-in.ts b/apps/desktop/src/lib/voice-barge-in.ts
-index 4d521f33d1..ebfc6f8066 100644
+index 179163e937..59b4525736 100644
 --- a/apps/desktop/src/lib/voice-barge-in.ts
 +++ b/apps/desktop/src/lib/voice-barge-in.ts
-@@ -19,6 +19,8 @@
- // - Detection is a windowed majority (>=80% of the last SUSTAINED_MS above
+@@ -24,6 +24,7 @@
  //   trigger) so intra-word energy dips don't reset progress.
  
+ import { closeMeterContext, meterContextsClosed } from '@/lib/mic-meter-context'
 +import { audioInputConstraints, isMissingDeviceError } from '@/lib/voice-devices'
-+
+ 
  const CALIBRATION_MS = 400
  const SUSTAINED_MS = 300
- const SUSTAINED_MAJORITY = 0.8
-@@ -157,9 +159,21 @@ export function monitorSpeechDuringPlayback(callbacks: BargeMonitorCallbacks): (
-   }
-   void (async () => {
-     try {
+@@ -198,9 +199,21 @@ export function monitorSpeechDuringPlayback(callbacks: BargeMonitorCallbacks): (
+         return
+       }
+ 
 -      stream = await navigator.mediaDevices.getUserMedia({
 -        audio: { echoCancellation: true, noiseSuppression: true }
 -      })
@@ -1517,18 +1534,18 @@ index 0000000000..a749fc9525
 +  return device.label?.trim() || fallback
 +}
 diff --git a/apps/desktop/src/lib/voice-playback.ts b/apps/desktop/src/lib/voice-playback.ts
-index 034fd7f79f..6d2824d2a8 100644
+index a31f9154da..8e54ac817b 100644
 --- a/apps/desktop/src/lib/voice-playback.ts
 +++ b/apps/desktop/src/lib/voice-playback.ts
-@@ -8,6 +8,7 @@ import {
-   type DirectTtsConfig,
-   synthesizeSpeechClientDirect
- } from '@/lib/voice-client-direct'
+@@ -3,6 +3,7 @@ import { resolveGatewayWsUrl } from '@hermes/shared'
+ import type { OwnerScope } from '@/api/client'
+ import { getApiRequestConnection, getApiRequestProfile, speakText } from '@/hermes'
+ import { directTtsConfig, type DirectTtsConfig, synthesizeSpeechClientDirect } from '@/lib/voice-client-direct'
 +import { applyAudioOutputDevice } from '@/lib/voice-devices'
  import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
  import {
    $voicePlayback,
-@@ -276,6 +277,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
+@@ -282,6 +283,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
          try {
            await new Promise<void>((resolve, reject) => {
              const audio = new Audio(url)
@@ -1536,7 +1553,7 @@ index 034fd7f79f..6d2824d2a8 100644
              playing = audio
              audio.addEventListener('ended', () => resolve(), { once: true })
              audio.addEventListener('error', () => reject(new Error('Playback failed')), { once: true })
-@@ -584,6 +586,7 @@ async function playSpeechDataUrl(
+@@ -595,6 +597,7 @@ async function playSpeechDataUrl(
    }
  
    const audio = new Audio(response.data_url)
@@ -1545,10 +1562,10 @@ index 034fd7f79f..6d2824d2a8 100644
    setVoicePlaybackState(currentState('speaking', options, audio))
  
 diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
-index 6bfcd5d5fb..38272178ec 100644
+index 098c7322be..d6b752d004 100644
 --- a/hermes_cli/config_defaults.py
 +++ b/hermes_cli/config_defaults.py
-@@ -1185,6 +1185,11 @@ DEFAULT_CONFIG = {
+@@ -1204,6 +1204,11 @@ DEFAULT_CONFIG = {
              # optional "api_key" / "base_url" keys override the OpenAI audio credentials for this mode only
          },
          "record_key": "ctrl+b",

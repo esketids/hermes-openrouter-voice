@@ -24,7 +24,7 @@ HERMES_REPO="${HERMES_REPO:-$HOME/.hermes/hermes-agent}"
 PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
 PATCH="$PATCH_DIR/gui-rows.patch"
 # The commit this patch was generated against. Used only to explain a failure.
-BASE="${GUI_PATCH_BASE:-93940214ea}"
+BASE="${GUI_PATCH_BASE:-9bb2ea1b5c}"
 PACK=1
 [ "${1:-}" = "--no-pack" ] && PACK=0
 
