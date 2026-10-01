@@ -1,5 +1,5 @@
 diff --git a/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts b/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
-index 19d85469db..a9a420a41f 100644
+index 19d85469db..8a08881d7d 100644
 --- a/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
 +++ b/apps/desktop/src/app/chat/composer/hooks/use-mic-recorder.ts
 @@ -1,6 +1,7 @@
@@ -29,7 +29,7 @@ index 19d85469db..a9a420a41f 100644
 +          throw error
 +        }
 +
-+        console.warn('[hermes] configured microphone unavailable, using the system default', error)
++        console.warn('[hermes] configured microphone unavailable for recording, using the system default', error)
 +
 +        stream = await navigator.mediaDevices.getUserMedia({ audio: constraints })
 +      }
@@ -831,10 +831,10 @@ index 4dd955dddb..cc79ad5b32 100644
        'voice.client_direct'
      ]
 diff --git a/apps/desktop/src/app/settings/helpers.ts b/apps/desktop/src/app/settings/helpers.ts
-index a8b9b8df7f..de24b49a81 100644
+index bb99f61f8a..4c055a79bb 100644
 --- a/apps/desktop/src/app/settings/helpers.ts
 +++ b/apps/desktop/src/app/settings/helpers.ts
-@@ -1,7 +1,14 @@
+@@ -2,7 +2,14 @@ import { foldPersonalityName } from '@/lib/personalities'
  import { asText, normalize } from '@/lib/text'
  import type { ConfigFieldSchema, HermesConfigRecord, ToolsetInfo } from '@/types/hermes'
  
@@ -850,7 +850,7 @@ index a8b9b8df7f..de24b49a81 100644
  
  // Canonical implementations live in @/lib/text; re-exported here so the many
  // settings/capabilities call sites keep their import path.
-@@ -381,6 +388,20 @@ export function enumOptionsFor(
+@@ -414,6 +421,20 @@ export function enumOptionsFor(
      }
    }
  
@@ -873,10 +873,10 @@ index a8b9b8df7f..de24b49a81 100644
    }
 diff --git a/apps/desktop/src/app/settings/voice-device-picker.test.tsx b/apps/desktop/src/app/settings/voice-device-picker.test.tsx
 new file mode 100644
-index 0000000000..a1423f1943
+index 0000000000..2bd287dd18
 --- /dev/null
 +++ b/apps/desktop/src/app/settings/voice-device-picker.test.tsx
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,119 @@
 +import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 +import { afterEach, describe, expect, it, vi } from 'vitest'
 +
@@ -967,13 +967,41 @@ index 0000000000..a1423f1943
 +
 +    expect(await screen.findByText(/No devices found/)).toBeTruthy()
 +  })
++
++  it('drops devices with no id instead of aliasing them onto "System default"', async () => {
++    // Before microphone permission is granted, entries can come back with an empty deviceId. Those
++    // cannot be addressed by getUserMedia, and listing one would land on the same select value as
++    // "System default" — selecting it would silently mean the default.
++    stubDevices([
++      { deviceId: '', kind: 'audioinput', label: 'Default - MacBook Pro Microphone' },
++      { deviceId: 'mic-a', kind: 'audioinput', label: 'MacBook Pro Microphone' }
++    ] as MediaDeviceInfo[])
++
++    render(<VoiceDevicePicker onChange={vi.fn()} schemaKey="voice.mic_device_id" value="" />)
++
++    await waitFor(() => expect(screen.getByText('System default')).toBeTruthy())
++    fireEvent.click(screen.getByRole('combobox'))
++
++    expect(await screen.findByRole('option', { name: 'MacBook Pro Microphone' })).toBeTruthy()
++    expect(screen.queryByRole('option', { name: /Default -/ })).toBeNull()
++    // exactly the real device plus the system-default entry
++    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(2)
++  })
++
++  it('says why the list is empty when every enumerated device lacks an id', async () => {
++    stubDevices([{ deviceId: '', kind: 'audioinput', label: '' }] as MediaDeviceInfo[])
++
++    render(<VoiceDevicePicker onChange={vi.fn()} schemaKey="voice.mic_device_id" value="" />)
++
++    expect(await screen.findByText(/No devices found/)).toBeTruthy()
++  })
 +})
 diff --git a/apps/desktop/src/app/settings/voice-device-picker.tsx b/apps/desktop/src/app/settings/voice-device-picker.tsx
 new file mode 100644
-index 0000000000..73a4f0e03f
+index 0000000000..d5fd99bf1b
 --- /dev/null
 +++ b/apps/desktop/src/app/settings/voice-device-picker.tsx
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,93 @@
 +import { useEffect, useState } from 'react'
 +
 +import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -1030,6 +1058,10 @@ index 0000000000..73a4f0e03f
 +  }, [kind])
 +
 +  const current = value.trim()
++  // A device with no id cannot be addressed by getUserMedia/setSinkId, and listing one would collide
++  // with the "System default" value. Before microphone permission is granted every entry can be
++  // id-less, so the list stays empty until then — the hint below says why.
++  const selectable = devices.filter(device => device.deviceId)
 +  const missing = Boolean(current) && loaded && !devices.some(device => device.deviceId === current)
 +
 +  return (
@@ -1043,11 +1075,8 @@ index 0000000000..73a4f0e03f
 +        </SelectTrigger>
 +        <SelectContent>
 +          <SelectItem value={EMPTY_SELECT_VALUE}>System default</SelectItem>
-+          {devices.map((device, index) => (
-+            <SelectItem
-+              key={device.deviceId || index}
-+              value={device.deviceId || EMPTY_SELECT_VALUE}
-+            >
++          {selectable.map((device, index) => (
++            <SelectItem key={device.deviceId} value={device.deviceId}>
 +              {deviceLabel(device, index, kind)}
 +            </SelectItem>
 +          ))}
@@ -1058,7 +1087,7 @@ index 0000000000..73a4f0e03f
 +          That device is not connected — the system default is used until it is back.
 +        </span>
 +      ) : null}
-+      {loaded && devices.length === 0 ? (
++      {loaded && selectable.length === 0 ? (
 +        <span className="max-w-56 text-right text-xs text-muted-foreground">
 +          No devices found. Grant microphone access, then reopen this page.
 +        </span>
@@ -1249,7 +1278,7 @@ index 0000000000..1b9bfbd1ba
 +  )
 +}
 diff --git a/apps/desktop/src/lib/voice-barge-in.ts b/apps/desktop/src/lib/voice-barge-in.ts
-index 179163e937..59b4525736 100644
+index 22d5582f10..78a73dbc33 100644
 --- a/apps/desktop/src/lib/voice-barge-in.ts
 +++ b/apps/desktop/src/lib/voice-barge-in.ts
 @@ -24,6 +24,7 @@
@@ -1257,10 +1286,10 @@ index 179163e937..59b4525736 100644
  
  import { closeMeterContext, meterContextsClosed } from '@/lib/mic-meter-context'
 +import { audioInputConstraints, isMissingDeviceError } from '@/lib/voice-devices'
+ import { $voiceSilenceMs } from '@/store/voice-prefs'
  
  const CALIBRATION_MS = 400
- const SUSTAINED_MS = 300
-@@ -198,9 +199,21 @@ export function monitorSpeechDuringPlayback(callbacks: BargeMonitorCallbacks): (
+@@ -202,9 +203,21 @@ export function monitorSpeechDuringPlayback(callbacks: BargeMonitorCallbacks): (
          return
        }
  
@@ -1278,7 +1307,7 @@ index 179163e937..59b4525736 100644
 +          throw error
 +        }
 +
-+        console.warn('[hermes] configured microphone unavailable, using the system default', error)
++        console.warn('[hermes] configured microphone unavailable for barge-in detection, using the system default', error)
 +
 +        stream = await navigator.mediaDevices.getUserMedia({ audio: bargeConstraints })
 +      }
@@ -1534,7 +1563,7 @@ index 0000000000..a749fc9525
 +  return device.label?.trim() || fallback
 +}
 diff --git a/apps/desktop/src/lib/voice-playback.ts b/apps/desktop/src/lib/voice-playback.ts
-index a31f9154da..8e54ac817b 100644
+index 94a59f1599..10affc28ed 100644
 --- a/apps/desktop/src/lib/voice-playback.ts
 +++ b/apps/desktop/src/lib/voice-playback.ts
 @@ -3,6 +3,7 @@ import { resolveGatewayWsUrl } from '@hermes/shared'
@@ -1545,7 +1574,7 @@ index a31f9154da..8e54ac817b 100644
  import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
  import {
    $voicePlayback,
-@@ -282,6 +283,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
+@@ -300,6 +301,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
          try {
            await new Promise<void>((resolve, reject) => {
              const audio = new Audio(url)
@@ -1553,7 +1582,7 @@ index a31f9154da..8e54ac817b 100644
              playing = audio
              audio.addEventListener('ended', () => resolve(), { once: true })
              audio.addEventListener('error', () => reject(new Error('Playback failed')), { once: true })
-@@ -595,6 +597,7 @@ async function playSpeechDataUrl(
+@@ -639,6 +641,7 @@ async function playSpeechDataUrl(
    }
  
    const audio = new Audio(response.data_url)
@@ -1562,10 +1591,10 @@ index a31f9154da..8e54ac817b 100644
    setVoicePlaybackState(currentState('speaking', options, audio))
  
 diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
-index 098c7322be..d6b752d004 100644
+index 1196da7252..062b2300ba 100644
 --- a/hermes_cli/config_defaults.py
 +++ b/hermes_cli/config_defaults.py
-@@ -1204,6 +1204,11 @@ DEFAULT_CONFIG = {
+@@ -1229,6 +1229,11 @@ DEFAULT_CONFIG = {
              # optional "api_key" / "base_url" keys override the OpenAI audio credentials for this mode only
          },
          "record_key": "ctrl+b",
