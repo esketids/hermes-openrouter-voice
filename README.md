@@ -80,6 +80,11 @@ pane:
 | **Microphone**, **Speaker** | the capture subpage, beside "Max recording duration" and "Client-direct voice" |
 | **OpenRouter Model** (STT) | **Transcription** |
 | **OpenRouter Voice Model**, **Voice**, **Playback Speed** (TTS) | **Speech** |
+| **Playback Volume** (0-200%) | **Speech** - one value for every TTS provider, applied to spoken replies and to the voice Preview buttons |
+
+Above 100% the audio is amplified with a WebAudio gain node; at or below it the element's own volume is
+used, so ordinary playback never touches the audio graph. If the graph cannot be built, the reply plays
+at source level rather than silently.
 
 Those two device rows must be listed in the `voice` subpage's `fields` as well: a row with no subpage
 owner only renders when the section's top level is shown, so it would be invisible during subpage

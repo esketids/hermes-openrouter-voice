@@ -98,15 +98,24 @@ index 0000000000..fd538bf64e
 +  })
 +})
 diff --git a/apps/desktop/src/app/settings/config-field.tsx b/apps/desktop/src/app/settings/config-field.tsx
-index 6681811706..ad9c1e7bfd 100644
+index 6681811706..568e853441 100644
 --- a/apps/desktop/src/app/settings/config-field.tsx
 +++ b/apps/desktop/src/app/settings/config-field.tsx
-@@ -14,6 +14,17 @@ import { FallbackModelsField } from './fallback-models-field'
+@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
+ import { useI18n } from '@/i18n'
+ import { prettyName } from '@/lib/text'
+ import { cn } from '@/lib/utils'
++import { VOICE_PLAYBACK_VOLUME_KEY } from '@/lib/voice-volume'
+ import type { ConfigFieldSchema } from '@/types/hermes'
+ 
+ import { ComboboxInput } from './combobox-input'
+@@ -14,6 +15,18 @@ import { FallbackModelsField } from './fallback-models-field'
  import { fieldCopyForSchemaKey } from './field-copy'
  import { ListRow, ToggleRow } from './primitives'
  import { SearchableSelect } from './searchable-select'
 +import { VoiceDevicePicker } from './voice-device-picker'
 +import { VoicePreviewButton } from './voice-preview-button'
++import { VoiceVolumeSlider } from './voice-volume-slider'
 +
 +// Rows whose value is audible: the local OpenRouter patch puts an audition button beside them, so a
 +// voice or a playback rate can be checked without leaving Settings (it previews the CURRENT
@@ -119,7 +128,7 @@ index 6681811706..ad9c1e7bfd 100644
  
  /**
   * One generic config row: label + description resolved from the i18n field
-@@ -83,7 +94,21 @@ export function ConfigField({
+@@ -83,7 +96,21 @@ export function ConfigField({
    const dataTour = `field-${schemaKey}`
  
    const row = (action: ReactNode) => (
@@ -142,10 +151,14 @@ index 6681811706..ad9c1e7bfd 100644
    )
  
    // Editors too big for the control column (textareas, structured lists) take
-@@ -105,6 +130,16 @@ export function ConfigField({
+@@ -105,6 +132,20 @@ export function ConfigField({
      return wideRow(<FallbackModelsField onChange={onChange} value={value} />)
    }
  
++  if (schemaKey === VOICE_PLAYBACK_VOLUME_KEY) {
++    return row(<VoiceVolumeSlider onChange={onChange} value={value} />)
++  }
++
 +  if (DEVICE_KEYS.has(schemaKey)) {
 +    return row(
 +      <VoiceDevicePicker
@@ -160,10 +173,10 @@ index 6681811706..ad9c1e7bfd 100644
      return (
        <ToggleRow
 diff --git a/apps/desktop/src/app/settings/config-subpages.ts b/apps/desktop/src/app/settings/config-subpages.ts
-index fe6f9d335c..df63976045 100644
+index fe6f9d335c..3889d03073 100644
 --- a/apps/desktop/src/app/settings/config-subpages.ts
 +++ b/apps/desktop/src/app/settings/config-subpages.ts
-@@ -72,7 +72,13 @@ const CONFIG_SUBPAGE_DEFINITIONS: Record<string, ConfigSubpageDefinition[]> = {
+@@ -72,11 +72,22 @@ const CONFIG_SUBPAGE_DEFINITIONS: Record<string, ConfigSubpageDefinition[]> = {
      {
        id: 'conversation',
        labelKey: 'voiceConversation',
@@ -178,8 +191,18 @@ index fe6f9d335c..df63976045 100644
        prefixes: ['voice.gpt_live.']
      },
      { id: 'transcription', labelKey: 'voiceTranscription', prefixes: ['stt.'] },
+-    { id: 'speech', labelKey: 'voiceSpeech', fields: ['voice.auto_tts'], prefixes: ['tts.'] }
++    {
++      id: 'speech',
++      labelKey: 'voiceSpeech',
++      fields: ['voice.auto_tts', 'voice.playback_volume'],
++      prefixes: ['tts.']
++    }
+   ],
+   advanced: [
+     { id: 'desktop', labelKey: 'advancedDesktop', prefixes: ['updates.'] },
 diff --git a/apps/desktop/src/app/settings/constants.ts b/apps/desktop/src/app/settings/constants.ts
-index 4dd955dddb..cc79ad5b32 100644
+index 4dd955dddb..9f3bf802b8 100644
 --- a/apps/desktop/src/app/settings/constants.ts
 +++ b/apps/desktop/src/app/settings/constants.ts
 @@ -361,6 +361,149 @@ export const ENUM_OPTIONS: Record<string, string[]> = {
@@ -757,7 +780,7 @@ index 4dd955dddb..cc79ad5b32 100644
  export const FREE_INPUT_KEYS = new Set([
    'tts.edge.voice',
    'voice.gpt_live.voice',
-@@ -401,12 +962,24 @@ export const FREE_INPUT_KEYS = new Set([
+@@ -401,12 +962,25 @@ export const FREE_INPUT_KEYS = new Set([
    'tts.kittentts.voice',
    'tts.piper.voice',
    'tts.deepinfra.model',
@@ -777,26 +800,29 @@ index 4dd955dddb..cc79ad5b32 100644
 +  'stt.openrouter.model': 'OpenRouter Model',
 +  'voice.mic_device_id': 'Microphone',
 +  'voice.speaker_device_id': 'Speaker',
++  'voice.playback_volume': 'Playback Volume',
 +  'tts.openrouter.model': 'OpenRouter Voice Model',
 +  'tts.openrouter.voice': 'OpenRouter Voice',
 +  'tts.openrouter.speed': 'OpenRouter Playback Speed',
    fallbackProviders: 'Fallback Models',
    toolsets: 'Enabled Toolsets',
    timezone: 'Timezone',
-@@ -587,6 +1160,12 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
+@@ -587,6 +1161,14 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
    model: 'Used for new chats unless you pick a different model in the composer.',
    modelContextLength:
      "Overrides the detected context window of the MAIN chat model only (tokens). Leave at 0 to use the selected model's detected value. Does not affect auxiliary/MoA models.",
 +  'stt.openrouter.model': 'Vendor-prefixed OpenRouter slug, e.g. openai/whisper-large-v3. Audited live: meta/muse-voice-transcribe-1.0 needs 16 or 24 kHz WAV.',
 +  'voice.mic_device_id': 'Which microphone to record from. "System default" follows whatever macOS is currently set to — picking a device here pins it, so a headset connecting later cannot take over mid-session.',
 +  'voice.speaker_device_id': 'Which speaker to play replies through. Separate from the wake-word input_device, which is a PortAudio device used by the Python side.',
++  'voice.playback_volume':
++    'How loud spoken replies play. 100% is the source level; above that the audio is amplified, up to 200%. One setting for every TTS provider, and it applies to the voice Preview buttons too.',
 +  'tts.openrouter.model': 'Vendor-prefixed OpenRouter speech slug, e.g. deepgram/aura-2. Hexgrad Kokoro emits only the first sentence; Gemini TTS needs pcm.',
 +  'tts.openrouter.voice': 'Voice for the selected model — the list follows the model, since voices are model-specific.',
 +  'tts.openrouter.speed': 'Playback speed. 0.7 = slower, 1.0 = normal, 1.5 = faster. Applied natively where the model supports it, otherwise by a local pitch-preserving time-stretch.',
    fallbackProviders: 'Backup provider:model entries to try if the default model fails.',
    display: {
      personality: 'Default assistant style for new sessions.',
-@@ -769,6 +1348,9 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -769,7 +1351,12 @@ export const SECTIONS: DesktopConfigSection[] = [
        'stt.enabled',
        'stt.echo_transcripts',
        'stt.provider',
@@ -804,9 +830,12 @@ index 4dd955dddb..cc79ad5b32 100644
 +      // row is keyed on the selected provider name and gated by voiceFieldVisible().
 +      'stt.openrouter.model',
        'voice.auto_tts',
++      // Spoken-reply volume; rendered by voice-volume-slider.tsx rather than the generic text box.
++      'voice.playback_volume',
        'tts.edge.voice',
        'tts.openai.model',
-@@ -795,6 +1377,12 @@ export const SECTIONS: DesktopConfigSection[] = [
+       'tts.openai.voice',
+@@ -795,6 +1382,12 @@ export const SECTIONS: DesktopConfigSection[] = [
        'tts.piper.voice',
        'tts.deepinfra.model',
        'tts.deepinfra.voice',
@@ -819,7 +848,7 @@ index 4dd955dddb..cc79ad5b32 100644
        'stt.local.model',
        'stt.local.language',
        'stt.openai.model',
-@@ -804,6 +1392,10 @@ export const SECTIONS: DesktopConfigSection[] = [
+@@ -804,6 +1397,10 @@ export const SECTIONS: DesktopConfigSection[] = [
        'stt.elevenlabs.language_code',
        'stt.elevenlabs.tag_audio_events',
        'stt.elevenlabs.diarize',
@@ -1277,6 +1306,91 @@ index 0000000000..1b9bfbd1ba
 +    </div>
 +  )
 +}
+diff --git a/apps/desktop/src/app/settings/voice-volume-slider.test.tsx b/apps/desktop/src/app/settings/voice-volume-slider.test.tsx
+new file mode 100644
+index 0000000000..cf397336ec
+--- /dev/null
++++ b/apps/desktop/src/app/settings/voice-volume-slider.test.tsx
+@@ -0,0 +1,36 @@
++import { cleanup, fireEvent, render, screen } from '@testing-library/react'
++import { afterEach, describe, expect, it, vi } from 'vitest'
++
++import { VoiceVolumeSlider } from './voice-volume-slider'
++
++afterEach(() => cleanup())
++
++describe('VoiceVolumeSlider', () => {
++  it('shows the level as a percentage and offers a bar', () => {
++    render(<VoiceVolumeSlider onChange={vi.fn()} value={1} />)
++
++    expect(screen.getByText('100%')).toBeTruthy()
++    expect(screen.getByLabelText('Playback volume')).toBeTruthy()
++  })
++
++  it('reports a change as a number string, so the config autosave stores a number', () => {
++    const onChange = vi.fn()
++
++    render(<VoiceVolumeSlider onChange={onChange} value={1} />)
++    fireEvent.change(screen.getByLabelText('Playback volume'), { target: { value: '1.5' } })
++
++    expect(onChange).toHaveBeenCalledWith('1.5')
++  })
++
++  it('clamps an unusable value rather than rendering it', () => {
++    render(<VoiceVolumeSlider onChange={vi.fn()} value={'loud'} />)
++
++    expect(screen.getByText('100%')).toBeTruthy()
++  })
++
++  it('can express the full boost range', () => {
++    render(<VoiceVolumeSlider onChange={vi.fn()} value={2} />)
++
++    expect(screen.getByText('200%')).toBeTruthy()
++  })
++})
+diff --git a/apps/desktop/src/app/settings/voice-volume-slider.tsx b/apps/desktop/src/app/settings/voice-volume-slider.tsx
+new file mode 100644
+index 0000000000..ef926f768a
+--- /dev/null
++++ b/apps/desktop/src/app/settings/voice-volume-slider.tsx
+@@ -0,0 +1,36 @@
++import { Slider } from '@/components/ui/slider'
++import { clampPlaybackVolume, MAX_PLAYBACK_VOLUME } from '@/lib/voice-volume'
++
++import { CONTROL_TEXT } from './constants'
++
++/**
++ * Playback volume bar for Settings → Voice (part of the local GUI patch).
++ *
++ * 0–200%, where 100% is the source level; the renderer amplifies above that with a gain node. The
++ * value is reported as a plain number string so the config autosave stores a number, matching the
++ * other numeric voice fields.
++ */
++export function VoiceVolumeSlider({
++  onChange,
++  value
++}: {
++  onChange: (next: string) => void
++  value: unknown
++}) {
++  const level = clampPlaybackVolume(value)
++
++  return (
++    <div className="flex items-center justify-end gap-2">
++      <Slider
++        aria-label="Playback volume"
++        className="w-40"
++        max={MAX_PLAYBACK_VOLUME}
++        min={0}
++        onChange={event => onChange(String(Number(event.target.value)))}
++        step={0.05}
++        value={level}
++      />
++      <span className={`${CONTROL_TEXT} w-12 text-right tabular-nums`}>{Math.round(level * 100)}%</span>
++    </div>
++  )
++}
+\ No newline at end of file
 diff --git a/apps/desktop/src/lib/voice-barge-in.ts b/apps/desktop/src/lib/voice-barge-in.ts
 index 22d5582f10..78a73dbc33 100644
 --- a/apps/desktop/src/lib/voice-barge-in.ts
@@ -1563,38 +1677,318 @@ index 0000000000..a749fc9525
 +  return device.label?.trim() || fallback
 +}
 diff --git a/apps/desktop/src/lib/voice-playback.ts b/apps/desktop/src/lib/voice-playback.ts
-index 94a59f1599..10affc28ed 100644
+index 94a59f1599..3ca4ab0509 100644
 --- a/apps/desktop/src/lib/voice-playback.ts
 +++ b/apps/desktop/src/lib/voice-playback.ts
-@@ -3,6 +3,7 @@ import { resolveGatewayWsUrl } from '@hermes/shared'
+@@ -3,6 +3,8 @@ import { resolveGatewayWsUrl } from '@hermes/shared'
  import type { OwnerScope } from '@/api/client'
  import { getApiRequestConnection, getApiRequestProfile, speakText } from '@/hermes'
  import { directTtsConfig, type DirectTtsConfig, synthesizeSpeechClientDirect } from '@/lib/voice-client-direct'
 +import { applyAudioOutputDevice } from '@/lib/voice-devices'
++import { applyPlaybackVolume, applyStreamPlaybackVolume } from '@/lib/voice-volume'
  import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
  import {
    $voicePlayback,
-@@ -300,6 +301,7 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
+@@ -300,6 +302,8 @@ function openClientDirectSpeechSession(tts: DirectTtsConfig, options: VoicePlayb
          try {
            await new Promise<void>((resolve, reject) => {
              const audio = new Audio(url)
 +            void applyAudioOutputDevice(audio)
++            applyPlaybackVolume(audio)
              playing = audio
              audio.addEventListener('ended', () => resolve(), { once: true })
              audio.addEventListener('error', () => reject(new Error('Playback failed')), { once: true })
-@@ -639,6 +641,7 @@ async function playSpeechDataUrl(
+@@ -473,8 +477,11 @@ function openSpeechStream(wsUrl: string, options: VoicePlaybackOptions): SpeechS
+     }
+ 
+     const source = context.createBufferSource()
++    const gain = context.createGain()
++    applyStreamPlaybackVolume(context, gain)
+     source.buffer = buffer
+-    source.connect(context.destination)
++    source.connect(gain)
++    gain.connect(context.destination)
+ 
+     const startAt = Math.max(context.currentTime + 0.05, nextStartAt)
+     source.start(startAt)
+@@ -639,6 +646,8 @@ async function playSpeechDataUrl(
    }
  
    const audio = new Audio(response.data_url)
 +  void applyAudioOutputDevice(audio)
++  applyPlaybackVolume(audio)
    currentAudio = audio
    setVoicePlaybackState(currentState('speaking', options, audio))
  
+diff --git a/apps/desktop/src/lib/voice-volume.test.ts b/apps/desktop/src/lib/voice-volume.test.ts
+new file mode 100644
+index 0000000000..31928a0180
+--- /dev/null
++++ b/apps/desktop/src/lib/voice-volume.test.ts
+@@ -0,0 +1,101 @@
++import { beforeEach, describe, expect, it, vi } from 'vitest'
++
++import { clampPlaybackVolume, MAX_PLAYBACK_VOLUME, playbackVolumeFrom } from './voice-volume'
++
++const CONFIG = (value: unknown) => ({ voice: { playback_volume: value } })
++
++function stubAudioContext(impl: () => unknown): void {
++  // defineProperty, not assignment: jsdom's AudioContext is not writable, so `globalThis.AudioContext =`
++  // silently does nothing and the real (absent) constructor path runs instead.
++  // A plain function, not an arrow: the module calls `new AudioContext()`, and an arrow cannot be
++  // constructed, which would make the constructor throw and take the fallback path.
++  Object.defineProperty(globalThis, 'AudioContext', {
++    configurable: true,
++    value: vi.fn(function AudioContextMock(this: unknown) {
++      return impl()
++    })
++  })
++}
++
++describe('playback volume resolution', () => {
++  it('defaults to source level when unset or unreadable', () => {
++    expect(playbackVolumeFrom(undefined)).toBe(1)
++    expect(playbackVolumeFrom({})).toBe(1)
++    expect(playbackVolumeFrom(CONFIG(''))).toBe(1)
++    expect(playbackVolumeFrom(CONFIG('loud'))).toBe(1)
++  })
++
++  it('reads numbers and numeric strings', () => {
++    expect(playbackVolumeFrom(CONFIG(0.5))).toBe(0.5)
++    expect(playbackVolumeFrom(CONFIG('1.5'))).toBe(1.5)
++  })
++
++  it('clamps to 0..MAX and rejects nonsense', () => {
++    expect(clampPlaybackVolume(-3)).toBe(0)
++    expect(clampPlaybackVolume(9)).toBe(MAX_PLAYBACK_VOLUME)
++    expect(clampPlaybackVolume('1.25')).toBe(1.25)
++    expect(clampPlaybackVolume('')).toBe(1)
++    expect(clampPlaybackVolume(null)).toBe(1)
++  })
++})
++
++describe('applying volume to a playback element', () => {
++  beforeEach(() => {
++    vi.resetModules()
++  })
++
++  it('uses the plain element volume at or below 100%, never touching the audio graph', async () => {
++    const AudioContextStub = vi.fn(function AudioContextMock(this: unknown) {
++      return undefined
++    })
++
++    Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: AudioContextStub })
++
++    const { applyPlaybackVolume: apply } = await import('./voice-volume')
++    const audio = document.createElement('audio')
++
++    apply(audio, 0.4)
++
++    expect(audio.volume).toBeCloseTo(0.4)
++    expect(AudioContextStub).not.toHaveBeenCalled()
++  })
++
++  it('amplifies above 100% through a gain node, keeping the element at unity', async () => {
++    const gain = { connect: vi.fn(), gain: { value: 1 } }
++    const source = { connect: vi.fn() }
++
++    const context = {
++      createGain: vi.fn(() => gain),
++      createMediaElementSource: vi.fn(() => source),
++      destination: {},
++      resume: vi.fn().mockResolvedValue(undefined),
++      state: 'running'
++    }
++
++    stubAudioContext(() => context)
++
++    const { applyPlaybackVolume: apply } = await import('./voice-volume')
++    const audio = document.createElement('audio')
++
++    apply(audio, 1.5)
++
++    expect(context.createMediaElementSource).toHaveBeenCalledWith(audio)
++    expect(source.connect).toHaveBeenCalledWith(gain)
++    expect(gain.connect).toHaveBeenCalledWith(context.destination)
++    expect(gain.gain.value).toBeCloseTo(1.5)
++    expect(audio.volume).toBe(1)
++  })
++
++  it('falls back to source level rather than silence when the graph cannot be built', async () => {
++    stubAudioContext(() => {
++      throw new Error('no web audio here')
++    })
++
++    const { applyPlaybackVolume: apply } = await import('./voice-volume')
++    const audio = document.createElement('audio')
++
++    apply(audio, 2)
++
++    expect(audio.volume).toBe(1)
++  })
++})
+diff --git a/apps/desktop/src/lib/voice-volume.ts b/apps/desktop/src/lib/voice-volume.ts
+new file mode 100644
+index 0000000000..c794b750fe
+--- /dev/null
++++ b/apps/desktop/src/lib/voice-volume.ts
+@@ -0,0 +1,150 @@
++import { HERMES_CONFIG_KEY } from '@/app/hooks/use-config-record'
++import { queryClient } from '@/lib/query-client'
++import type { HermesConfigRecord } from '@/types/hermes'
++
++/**
++ * Voice playback volume for the desktop (part of the local GUI patch).
++ *
++ * One global setting — `voice.playback_volume` — rather than a key per TTS provider: what is being
++ * adjusted is the speaker, and the same level should hold when you switch provider.
++ *
++ * The range is 0.0-2.0, where 1.0 is the source level. `HTMLMediaElement.volume` stops at 1.0, so a
++ * value above that is expressed with a WebAudio gain node instead. At or below 1.0 nothing touches the
++ * audio graph — the plain `volume` property is used — so the common case carries no risk of an
++ * unconnected graph playing silence.
++ *
++ * Reads go through the React Query cache because playback and the voice preview are plain modules, not
++ * components: the same `queryClient.getQueryData(...)` pattern `voice-devices.ts` uses.
++ */
++export const VOICE_PLAYBACK_VOLUME_KEY = 'voice.playback_volume'
++export const MAX_PLAYBACK_VOLUME = 2
++
++function configRecord(): unknown {
++  try {
++    return queryClient.getQueryData<HermesConfigRecord>(HERMES_CONFIG_KEY)
++  } catch {
++    return undefined
++  }
++}
++
++function rawVolume(config: unknown): unknown {
++  let node: unknown = config
++
++  for (const part of VOICE_PLAYBACK_VOLUME_KEY.split('.')) {
++    if (!node || typeof node !== 'object') {
++      return undefined
++    }
++
++    node = (node as Record<string, unknown>)[part]
++  }
++
++  return node
++}
++
++/** Clamp to the supported range, falling back to source level for anything unusable. */
++export function clampPlaybackVolume(value: unknown): number {
++  // An empty or blank value means "unset", not zero: Number('') is 0, which would silently mute
++  // playback for anyone whose config carries an empty string.
++  if (typeof value === 'string' && value.trim() === '') {
++    return 1
++  }
++
++  const raw = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN
++
++  if (!Number.isFinite(raw)) {
++    return 1
++  }
++
++  return Math.min(MAX_PLAYBACK_VOLUME, Math.max(0, raw))
++}
++
++/** The configured volume, or 1.0 when unset or unreadable. */
++export function playbackVolumeFrom(config: unknown): number {
++  const raw = rawVolume(config)
++
++  return raw === undefined || raw === null || raw === '' ? 1 : clampPlaybackVolume(raw)
++}
++
++export function playbackVolume(): number {
++  return playbackVolumeFrom(configRecord())
++}
++
++// One context for the whole renderer: creating one per element would leak contexts, and a single
++// suspended context is easier to reason about than many.
++let sharedContext: AudioContext | null = null
++
++// Per-element source + gain, so replaying through the same element reuses its node. A media element
++// can only be wired into a context once.
++const graphs = new WeakMap<HTMLMediaElement, GainNode>()
++
++function audioContext(): AudioContext | null {
++  if (sharedContext) {
++    return sharedContext
++  }
++
++  try {
++    sharedContext = new AudioContext()
++
++    return sharedContext
++  } catch {
++    return null
++  }
++}
++
++function resume(context: AudioContext): void {
++  if (context.state === 'suspended') {
++    void context.resume().catch(() => undefined)
++  }
++}
++
++/**
++ * Apply the configured volume to a playback element.
++ *
++ * Above 100% the element is routed through a gain node; if that cannot be built, the element plays at
++ * source level rather than silently — a quiet reply is recoverable, a missing one looks like a bug.
++ */
++export function applyPlaybackVolume(audio: HTMLMediaElement, volume: number = playbackVolume()): void {
++  const level = clampPlaybackVolume(volume)
++
++  if (level <= 1) {
++    audio.volume = level
++
++    return
++  }
++
++  const context = audioContext()
++  let gain = context ? graphs.get(audio) : undefined
++
++  if (context && !gain) {
++    try {
++      const node = context.createGain()
++      const source = context.createMediaElementSource(audio)
++      source.connect(node)
++      node.connect(context.destination)
++      graphs.set(audio, node)
++      gain = node
++    } catch {
++      gain = undefined
++    }
++  }
++
++  if (!context || !gain) {
++    audio.volume = 1
++
++    return
++  }
++
++  // The element stays at unity so the gain is the only multiplier.
++  audio.volume = 1
++  gain.gain.value = level
++  resume(context)
++}
++
++/**
++ * The same level for the gateway-relay streaming path, which decodes into its own context and so owns
++ * its graph. Call before connecting the source.
++ */
++export function applyStreamPlaybackVolume(context: AudioContext, gain: GainNode): void {
++  gain.gain.value = clampPlaybackVolume(playbackVolume())
++  resume(context)
++}
+\ No newline at end of file
 diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
-index 1196da7252..062b2300ba 100644
+index 1196da7252..72a72c09d2 100644
 --- a/hermes_cli/config_defaults.py
 +++ b/hermes_cli/config_defaults.py
-@@ -1229,6 +1229,11 @@ DEFAULT_CONFIG = {
+@@ -1229,6 +1229,14 @@ DEFAULT_CONFIG = {
              # optional "api_key" / "base_url" keys override the OpenAI audio credentials for this mode only
          },
          "record_key": "ctrl+b",
@@ -1603,6 +1997,9 @@ index 1196da7252..062b2300ba 100644
 +        # Empty = follow whatever the OS currently uses.
 +        "mic_device_id": "",
 +        "speaker_device_id": "",
++        # Spoken-reply volume, 0.0-2.0 (1.0 = source level; above that the renderer amplifies with a
++        # gain node). One value for every TTS provider, and it applies to the voice preview too.
++        "playback_volume": 1.0,
          "submit_mode": "direct",  # TUI: direct submits immediately; draft = editable transcript
          "max_recording_seconds": 120,
          "auto_tts": False,
