@@ -1,37 +1,26 @@
 # hermes-openrouter-voice
 
-Adds **OpenRouter** to both voice directions in [Hermes Agent](https://github.com/NousResearch/hermes-agent):
+OpenRouter for **both** voice directions in [Hermes Agent](https://github.com/NousResearch/hermes-agent) —
+speech-to-text and text-to-speech — reusing the `OPENROUTER_API_KEY` your chat provider already uses. No
+second account, no second bill, no pip dependencies.
 
 | Direction | Config | Endpoint |
 |---|---|---|
 | Speech-to-text | `stt.provider: openrouter` | `POST /api/v1/audio/transcriptions` |
 | Text-to-speech | `tts.provider: openrouter` | `POST /api/v1/audio/speech` |
 
-Both reuse **`OPENROUTER_API_KEY`** — the key your chat provider already uses — so there is no second
-account or bill. Stdlib only, no pip dependencies.
-
 Upstream closed the "built-in OpenRouter STT provider" request as not-planned
-([#24415](https://github.com/NousResearch/hermes-agent/issues/24415)) in favour of the provider surfaces
-(plugins and `stt.providers.<name>` command providers). This plugin is that path, packaged.
+([#24415](https://github.com/NousResearch/hermes-agent/issues/24415)) in favour of the provider surfaces —
+plugins and `stt.providers.<name>` command providers. This plugin is that path, packaged.
 
-## Install
+## Install and configure
 
 ```bash
 hermes plugins install esketids/hermes-openrouter-voice
-hermes plugins enable openrouter-voice
-```
-
-Per profile (each profile has its own config and plugins), add `--profile <name>` to both commands.
-Later: `hermes plugins update openrouter-voice`.
-
-## Configure
-
-```bash
+hermes plugins enable openrouter-voice              # per profile: add --profile <name>
 hermes config set stt.provider openrouter
-hermes config set tts.provider openrouter      # only if you want OpenRouter speech output
+hermes config set tts.provider openrouter           # only if you want OpenRouter speech output
 ```
-
-Optional model choices (defaults shown):
 
 ```yaml
 stt:
@@ -45,11 +34,51 @@ tts:
     speed: 1.0                         # 0.25-4.0
 ```
 
+The verified defaults are `openai/whisper-large-v3`, and `deepgram/aura-2` + `aura-2-thalia-en`, which
+speaks multi-sentence input in full.
+
+## Models, voices and limits
+
+| Key | Shipped | Source |
+|---|---|---|
+| `stt.openrouter.model` | **21** transcription models | `GET /api/v1/models?output_modalities=transcription` |
+| `tts.openrouter.model` | **18** speech models | `GET /api/v1/models?output_modalities=speech` |
+| `tts.openrouter.voice` | **361** voices across 16 models | each model's `supported_voices` (there is no voices endpoint) |
+
+```bash
+python models.py                     # the shipped catalogs, no network
+python models.py --voices [model]    # one model's voice set
+python models.py --live              # diff the shipped lists against the API
+python models.py --sample deepgram/aura-2 --montage   # cached voice clips + a montage
+```
+
+Voice counts: `deepgram/aura-2` 90, `hexgrad/kokoro-82m` 54, `minimax/speech-2.8-*` 45,
+`mistralai/voxtral-mini-tts-2603` 30, `microsoft/mai-voice-2` 4, `fish-audio/*` none published (leave the
+voice empty and the provider uses its default). Samples land in
+`~/.hermes/cache/openrouter-voice-samples/<model>/`, one clip per voice, each naming its own voice first so
+a montage is self-labelling — the API publishes no preview URLs.
+
+`tts.openrouter.speed` is honoured two ways: sent natively where the model supports it (`aura-2` accepts
+only 0.7-1.5; `qwen/*` rejects it entirely), otherwise applied as a local pitch-preserving time-stretch via
+`ffmpeg atempo`. Without ffmpeg the rate is sent to the API only.
+
+Measured against the live API rather than assumed — the things most likely to surprise you:
+
+| Constraint | Detail |
+|---|---|
+| `response_format` | transcription accepts only `json` / `verbose_json`; `"text"` is a 400 |
+| `meta/muse-voice-transcribe-1.0` | requires **16 or 24 kHz mono WAV**; 22.05 kHz is a live 400 |
+| Containers | every other model accepts MP3/WebM; the desktop records WebM/Opus, which needs ffmpeg to reach a WAV-only model |
+| `hexgrad/kokoro-82m` | returns **only the first sentence** |
+| `google/gemini-3.1-flash-tts-preview` | rejects mp3 and demands `pcm` |
+
 ## In the desktop GUI
 
-**Without any patch:** the two provider *names* become selectable in Settings → Voice (the model and
-voice rows do not appear). Hermes builds that dropdown from a bundle-compiled list plus any **command
-provider declared in config**, so declare these two:
+The provider **names** become selectable in Settings → Voice once the command providers are declared —
+Hermes builds that dropdown from a bundle-compiled list plus any command provider in config:
+
+<details>
+<summary>Command-provider config for GUI selectability</summary>
 
 ```bash
 PY=~/.hermes/hermes-agent/venv/bin/python
@@ -64,18 +93,26 @@ hermes config set --force tts.providers.openrouter.command \
 hermes config set --force tts.providers.openrouter.voice_compatible true
 ```
 
-`--force` is required (without it Hermes writes nothing for these dotted registry keys), and
-`--config <path>` is not optional: profiles are not always distinguished by `HERMES_HOME`, so the shim
-must be told which config to read.
+`--force` is required — without it Hermes writes nothing for these dotted registry keys. `--config` is not
+optional either: profiles are not always distinguished by `HERMES_HOME`, so the shim must be told which
+config to read.
 
-**With the GUI patch:** adds the OpenRouter **model / voice / speed rows**, a **Preview** button beside
-the voice and speed rows (speaks a sample using the settings in force at that moment), makes the voice
-list **follow the selected model**, and adds the **microphone / speaker device pickers**.
+</details>
+
+**Model / voice / speed dropdowns, Preview buttons, microphone and speaker pickers, and a
+playback-volume slider** come from a patch that edits the desktop app itself. It is deliberately **not in
+this repo's tree** — a plugin-catalog entry may not ship a patch for the app — and lives on branch
+**`gui-rows`**, with a copy on each machine that uses it:
+
+```bash
+~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh               # patch + repack
+~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh --no-pack     # patch only
+```
 
 Each row lands in the subpage its key belongs to (routing is by key prefix), so nothing piles up in one
 pane:
 
-| Row | Subpage in Settings → Voice |
+| Row | Subpage in Settings -> Voice |
 |---|---|
 | **Microphone**, **Speaker** | the capture subpage, beside "Max recording duration" and "Client-direct voice" |
 | **OpenRouter Model** (STT) | **Transcription** |
@@ -83,86 +120,23 @@ pane:
 | **Playback Volume** (0-200%) | **Speech** - one value for every TTS provider, applied to spoken replies and to the voice Preview buttons |
 
 Above 100% the audio is amplified with a WebAudio gain node; at or below it the element's own volume is
-used, so ordinary playback never touches the audio graph. If the graph cannot be built, the reply plays
-at source level rather than silently.
+used, so ordinary playback never touches the audio graph. If the graph cannot be built, the reply plays at
+source level rather than silently.
 
-Those two device rows must be listed in the `voice` subpage's `fields` as well: a row with no subpage
-owner only renders when the section's top level is shown, so it would be invisible during subpage
-navigation — the app's own test (`routes every curated field … to its owning child`) fails on exactly
-that, which is how this was caught.
+The two device rows must be listed in the `voice` subpage's `fields` as well: a row with no subpage owner
+only renders when the section's top level is shown, so it would be invisible during subpage navigation.
 
-The rows live in a bundle-compiled list (`SECTIONS` in `apps/desktop/src/app/settings/constants.ts`), so
-no plugin or config entry can add one — a plugin contributes Python providers, not UI. The patch is kept
-**out of this repo's tree** (a catalog entry may not ship a patch for the app) and lives on branch
-**`gui-rows`**, with a copy on each machine that uses it:
+The rows live in a bundle-compiled list, so no plugin or config key can add one. Two things make it feel
+fragile, both handled in `gui/`: `hermes update` replaces the checkout (re-run the script — a watchdog
+notices and reports, staying silent while healthy), and the patch is cut against **one commit**, so a moved
+base makes it fail loudly rather than half-apply.
 
-```bash
-~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh               # patch + repack (~5 min)
-~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh --no-pack     # patch only
-```
+The microphone and speaker rows use **browser device ids** (`navigator.mediaDevices.enumerateDevices()`), a
+different namespace from `wake_word.input_device` — that one is a **PortAudio** index for wake-word capture
+on the Python side. An unplugged device falls back to the system default, and the row says so rather than
+switching silently.
 
-Three things to know, because they are what make it feel fragile:
-
-* `hermes update` replaces the checkout and rebuilds the app, so the rows disappear — re-run the script.
-  A **watchdog** (`gui/watch-gui-rows.sh`, run by cron) notices, re-applies what it can, and speaks only
-  when something needs a human; it stays silent while healthy.
-* The patch is cut against **one commit**, and upstream edits these files most releases, so after an
-  update it fails **loudly** (naming its base and your HEAD) instead of half-applying. Re-cut it.
-* The device pickers need the backend to **restart**, not just the app to reload: their keys come from
-  the schema, which the Python process reads at boot.
-
-The pickers use **browser device ids** (`navigator.mediaDevices.enumerateDevices()`), a different
-namespace from `wake_word.input_device` — that one is a **PortAudio** index for wake-word capture on the
-Python side. A chosen device that is unplugged raises `OverconstrainedError`: recording falls back to the
-system default and the row says so, rather than switching silently.
-
-## What the endpoint actually accepts (measured, not assumed)
-
-| Finding | Detail |
-|---|---|
-| `response_format` | transcription accepts only `json` / `verbose_json`; `"text"` is a **400** |
-| Sample rate | `meta/muse-voice-transcribe-1.0` requires **16 or 24 kHz mono WAV**; 22.05 kHz is a live 400. PCM WAV is normalised in pure Python, no ffmpeg |
-| Containers | every model but that one accepts MP3/WebM; the desktop records `audio/webm;codecs=opus`, which needs **ffmpeg** to reach a WAV-only model |
-| Truncation | `hexgrad/kokoro-82m` returns **only the first sentence** — not the default |
-| Format | `google/gemini-3.1-flash-tts-preview` rejects mp3 and demands `pcm`, so mp3 is always requested |
-| Voices | model-specific: `aura-2-*` for `deepgram/aura-2`, `af_heart` for Kokoro |
-| Verified default | `deepgram/aura-2` + `aura-2-thalia-en` — speaks multi-sentence input in full |
-
-## Models, voices, speed
-
-```bash
-python models.py                     # shipped catalogs (no network)
-python models.py --voices [model]    # a model's voice set
-python models.py --live              # diff the shipped lists against the API
-```
-
-| Config key | Shipped | Source |
-|---|---|---|
-| `stt.openrouter.model` | **21** transcription models | `GET /api/v1/models?output_modalities=transcription` |
-| `tts.openrouter.model` | **18** speech models | `GET /api/v1/models?output_modalities=speech` |
-| `tts.openrouter.voice` | **361** voices across 16 models | each model's `supported_voices` (there is no voices endpoint) |
-
-Voice counts: `deepgram/aura-2` 90, `hexgrad/kokoro-82m` 54, `minimax/speech-2.8-*` 45,
-`mistralai/voxtral-mini-tts-2603` 30, `microsoft/mai-voice-2` 4, `fish-audio/*` **none published**
-(leave the voice empty; the provider uses its default).
-
-`tts.openrouter.speed` is honoured on every model, two ways: sent **natively** where the model supports it
-(`aura-2` accepts only 0.7-1.5 — 1.6 is a 400; `qwen/*` rejects the parameter entirely), otherwise applied
-as a local pitch-preserving time-stretch (`ffmpeg atempo`). Measured with `speed=1.5`: audio landed at
-0.60-0.68 of baseline; expect ±10-20 %, since providers pace themselves differently between runs. Without
-ffmpeg the rate is sent to the API only.
-
-Voice samples (the API publishes no preview URLs):
-
-```bash
-python models.py --sample deepgram/aura-2              # one clip per voice, cached
-python models.py --sample deepgram/aura-2 --montage    # plus a concatenated file
-```
-
-Each clip names its own voice first, so a montage is self-labelling. Output lands in
-`~/.hermes/cache/openrouter-voice-samples/<model>/`.
-
-## Verify / layout
+## Verify and layout
 
 ```bash
 $PY ~/.hermes/plugins/openrouter-voice/transcribe.py --config ~/.hermes/config.yaml clip.wav
@@ -170,7 +144,7 @@ python -m pytest tests/ -q          # audio normaliser: downmix, resample, idemp
 ```
 
 ```
-__init__.py      register(ctx) → registers BOTH providers
+__init__.py      register(ctx) -> registers BOTH providers
 common.py        credentials, profile-aware config, WAV normalise/resample, HTTP
 stt_core.py      transcription logic (no Hermes imports)     stt.py   provider wrapper
 tts_core.py      synthesis logic (no Hermes imports)         tts.py   provider wrapper
@@ -183,11 +157,11 @@ ABC subclasses live in `stt.py` / `tts.py` and the logic is shared.
 
 ## Related upstream work
 
-* **Listed in the Hermes plugin catalog** — catalog entry merged 2026-09-20.
-* [#24415](https://github.com/NousResearch/hermes-agent/issues/24415) — STT provider (closed, not-planned; this plugin is the sanctioned alternative)
-* [#15726](https://github.com/NousResearch/hermes-agent/issues/15726) — TTS provider (open)
-* [#117088](https://github.com/NousResearch/hermes-agent/pull/117088) — microphone/speaker pickers for everyone (open)
-* [#112122](https://github.com/NousResearch/hermes-agent/pull/112122) / [#112126](https://github.com/NousResearch/hermes-agent/pull/112126) — built-in provider variants (open; upstream prefers extending the existing transports instead)
+- **Listed in the Hermes plugin catalog** (catalog entry merged 2026-09-20)
+- [#117088](https://github.com/NousResearch/hermes-agent/pull/117088) — microphone/speaker pickers for everyone (open)
+- [#24415](https://github.com/NousResearch/hermes-agent/issues/24415) — STT provider (closed, not-planned; this plugin is the sanctioned alternative)
+- [#15726](https://github.com/NousResearch/hermes-agent/issues/15726) — TTS provider (open)
+- [#112122](https://github.com/NousResearch/hermes-agent/pull/112122) / [#112126](https://github.com/NousResearch/hermes-agent/pull/112126) — built-in provider variants (open; upstream prefers extending the existing transports instead)
 
 ## Licence
 
