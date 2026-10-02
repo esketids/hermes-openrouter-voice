@@ -16,6 +16,7 @@ from hermes_openrouter_voice_common import (
     resolve_tts_settings,
     split_speed,
     synthesize_request,
+    apply_volume,
     time_stretch,
     voices_for_model,
 )
@@ -85,5 +86,11 @@ def synthesize_to_file(
         stretched = time_stretch(str(target), local_stretch)
         if stretched != str(target):
             target.write_bytes(pathlib.Path(stretched).read_bytes())
+
+    volume = float(settings.get("volume", 1.0))
+    if abs(volume - 1.0) >= 0.01:
+        levelled = apply_volume(str(target), volume)
+        if levelled != str(target):
+            target.write_bytes(pathlib.Path(levelled).read_bytes())
 
     return str(target)

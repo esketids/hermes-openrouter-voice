@@ -48,6 +48,11 @@ DEFAULT_TTS_BASE_URL = os.environ.get("TTS_OPENROUTER_BASE_URL", "https://openro
 #   minimax, mai-voice-2, kokoro accept 0.25-3.0
 # Anything outside a model's range is sent as the nearest in-range value with the remainder
 # time-stretched locally, so one control covers 0.25-4.0 without ever 400ing.
+#
+# Spoken-reply volume: 1.0 is the source level. Above that the plugin amplifies the synthesised audio
+# with ffmpeg before handing it back, which is the only way a provider can raise the level — and the
+# only way it survives an app update.
+MAX_TTS_VOLUME = 2.0
 NATIVE_SPEED_RANGES: Dict[str, tuple] = {
     "deepgram/aura-2": (0.7, 1.5),
     "minimax/speech-2.8-turbo": (0.25, 3.0),
@@ -698,6 +703,15 @@ def resolve_tts_settings(explicit_config: str = "") -> Dict[str, Any]:
         speed = float(speed)
     except (TypeError, ValueError):
         speed = 1.0
+    # Spoken-reply volume, 0.0-MAX_TTS_VOLUME. An empty or unusable value means source level, never
+    # silence: Number('') is 0 in the renderer and float('') raises here, so both ends guard it.
+    volume: Any = per_provider.get("volume")
+    if not isinstance(volume, (int, float)):
+        volume = section.get("volume", 1.0)
+    try:
+        volume = max(0.0, min(MAX_TTS_VOLUME, float(volume)))
+    except (TypeError, ValueError):
+        volume = 1.0
     return {
         "model": _first_string(per_provider.get("model"), _command_block(section).get("model"))
                  or DEFAULT_TTS_MODEL,
@@ -705,6 +719,7 @@ def resolve_tts_settings(explicit_config: str = "") -> Dict[str, Any]:
                  or DEFAULT_TTS_VOICE,
         "base_url": _first_string(per_provider.get("base_url")).rstrip("/") or DEFAULT_TTS_BASE_URL,
         "speed": speed,
+        "volume": volume,
         "api_key": api_key(),
     }
 
@@ -878,6 +893,29 @@ def build_atempo_chain(rate: float) -> str:
     if abs(remaining - 1.0) > 0.01:
         parts.append(f"atempo={remaining:.4f}")
     return ",".join(parts)
+
+
+def apply_volume(path: str, volume: float) -> str:
+    """Rewrite the audio at *volume* (1.0 = source level); the original path when the level is unity or
+    ffmpeg is unavailable.
+
+    Applied provider-side, in the plugin, rather than in the renderer: it then holds for every playback
+    path Hermes uses (client-direct, gateway relay, data-URL fallback), it needs no app patch, and it
+    survives an update.
+    """
+    if abs(volume - 1.0) < 0.01:
+        return path
+    ffmpeg = ffmpeg_path()
+    if not ffmpeg:
+        return path
+    out = pathlib.Path(tempfile.mkdtemp()) / (pathlib.Path(path).stem + "-volume.mp3")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-loglevel", "error", "-i", path, "-filter:a", f"volume={volume:.3f}", str(out)],
+        capture_output=True,
+    )
+    if proc.returncode == 0 and out.exists() and out.stat().st_size > 0:
+        return str(out)
+    return path
 
 
 def time_stretch(path: str, rate: float) -> str:
