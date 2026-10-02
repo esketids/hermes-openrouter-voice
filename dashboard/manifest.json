@@ -1,0 +1,11 @@
+{
+  "name": "openrouter-voice",
+  "label": "OpenRouter Voice",
+  "description": "OpenRouter for both voice directions: provider switches, model, voice, playback volume and a preview.",
+  "icon": "AudioLines",
+  "version": "1.7.0",
+  "tab": { "path": "/openrouter-voice", "position": "after:voice" },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

@@ -1,0 +1,9 @@
+.ov-page { display: flex; flex-direction: column; gap: 16px; padding: 4px; max-width: 42rem; }
+.ov-card { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; }
+.ov-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ov-row label { color: var(--muted-foreground); }
+.ov-inline { display: flex; align-items: center; gap: 8px; }
+.ov-value { min-width: 3.5rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.ov-note { color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.ov-error { color: #d9534f; font-size: 12px; }
+.ov-page select, .ov-page input[type="range"] { min-width: 11rem; }

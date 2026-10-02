@@ -109,6 +109,26 @@ this repo's tree** — a plugin-catalog entry may not ship a patch for the app �
 ~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh --no-pack     # patch only
 ```
 
+### What a plugin may do — the surfaces this plugin now uses
+
+The rows above need an app patch, but the same controls are reachable through supported plugin surface,
+and this plugin ships all three:
+
+| Surface | File | What it gives |
+|---|---|---|
+| Backend routes | `dashboard/plugin_api.py` | `GET`/`POST /settings`, `GET /catalogs`, `POST /preview` under `/api/plugins/openrouter-voice/` |
+| Dashboard tab | `dashboard/dist/index.js` | provider switches, model, voice, playback volume and a Preview button |
+| Native pane | `desktop/plugin.js` | the same controls as an Electron pane (`area: PANES_AREA`) |
+
+**Playback volume lives in the provider**, not the renderer: `tts.openrouter.volume` (0.0-2.0) is applied by
+`speak.py` / `tts_core.py` before the audio is handed back, so it covers every playback path Hermes uses —
+client-direct, the gateway relay and the data-URL fallback — and it survives `hermes update`. Measured with
+`ffmpeg volumedetect`: 1.5 → +3.10 dB, 2.0 → +5.50 dB, 0.5 → −6.50 dB (theory +3.52 / +6.02 / −6.02, the
+gap being mp3 re-encode loss). Needs ffmpeg; without it the level is left alone rather than failing.
+
+Microphone and speaker pickers cannot be done this way — a plugin cannot pin the recorder the app uses —
+which is why that part is upstream, in [#117088](https://github.com/NousResearch/hermes-agent/pull/117088).
+
 The rows live in a bundle-compiled list, so no plugin or config key can add one. Two things make it feel
 fragile, both handled in `gui/`: `hermes update` replaces the checkout (re-run the script — a watchdog
 notices and reports, staying silent while healthy), and the patch is cut against **one commit**, so a moved
