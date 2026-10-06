@@ -99,26 +99,21 @@ config to read.
 
 </details>
 
-**Model / voice / speed dropdowns, Preview buttons, microphone and speaker pickers, and a
-playback-volume slider** come from a patch that edits the desktop app itself. It is deliberately **not in
-this repo's tree** — a plugin-catalog entry may not ship a patch for the app — and lives on branch
-**`gui-rows`**, with a copy on each machine that uses it:
+### The supported surfaces — this is the compliant path
 
-```bash
-~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh               # patch + repack
-~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh --no-pack     # patch only
-```
-
-### What a plugin may do — the surfaces this plugin now uses
-
-The rows above need an app patch, but the same controls are reachable through supported plugin surface,
-and this plugin ships all three:
+A plugin may contribute a **tab**, a **native pane**, **backend routes** and **status-bar items**; it may
+not add rows to Settings → Voice, whose rows live in a bundle-compiled list inside the app. This plugin
+ships all three surfaces, so everything except the microphone/speaker pickers is reachable without touching
+the app:
 
 | Surface | File | What it gives |
 |---|---|---|
 | Backend routes | `dashboard/plugin_api.py` | `GET`/`POST /settings`, `GET /catalogs`, `POST /preview` under `/api/plugins/openrouter-voice/` |
 | Dashboard tab | `dashboard/dist/index.js` | provider switches, model, voice, playback volume and a Preview button |
 | Native pane | `desktop/plugin.js` | the same controls as an Electron pane (`area: PANES_AREA`) |
+
+Electron copies `desktop/` into `$HERMES_HOME/desktop-plugins/<package>/` for you (a
+`.hermes-package.json` marker records where it came from), so the pane appears with no install step.
 
 **Playback volume lives in the provider**, not the renderer: `tts.openrouter.volume` (0.0-2.0) is applied by
 `speak.py` / `tts_core.py` before the audio is handed back, so it covers every playback path Hermes uses —
@@ -129,15 +124,27 @@ gap being mp3 re-encode loss). Needs ffmpeg; without it the level is left alone 
 Microphone and speaker pickers cannot be done this way — a plugin cannot pin the recorder the app uses —
 which is why that part is upstream, in [#117088](https://github.com/NousResearch/hermes-agent/pull/117088).
 
-The rows live in a bundle-compiled list, so no plugin or config key can add one. Two things make it feel
-fragile, both handled in `gui/`: `hermes update` replaces the checkout (re-run the script — a watchdog
-notices and reports, staying silent while healthy), and the patch is cut against **one commit**, so a moved
-base makes it fail loudly rather than half-apply.
+### Where the app lives
 
-The microphone and speaker rows use **browser device ids** (`navigator.mediaDevices.enumerateDevices()`), a
-different namespace from `wake_word.input_device` — that one is a **PortAudio** index for wake-word capture
-on the Python side. An unplugged device falls back to the system default, and the row says so rather than
-switching silently.
+Hermes 0.21.5's updater leaves an **installer** at `/Applications/Hermes.app` — `Hermes-Setup`, about 12 MB.
+The launchable app is the packaged build, e.g. `apps/desktop/release/mac-arm64/Hermes.app` in a source
+checkout; copy it somewhere of your own (this machine uses `~/Applications/Hermes.app`) and launch from
+there. **Never write into `/Applications/Hermes.app`** — that path is the installer, not the app, and
+overwriting it replaces the installer with a stale build.
+
+### Optional: the Settings rows (retired)
+
+Earlier versions shipped an app patch that added the rows to Settings → Voice, a microphone/speaker picker
+and a client-side volume slider. It is **retired**: it needs re-cutting against every release, a catalog
+entry may not ship a patch for the app, and the supported surfaces above cover the same ground. The patch,
+its applier and its watchdog stay archived at
+`~/.hermes/patches/openrouter-voice-gui/retired-45871e100f/` and on the repo's `gui-rows` branch, in case
+the rows are wanted back before #117088 lands.
+
+The retired pickers used **browser device ids** (`navigator.mediaDevices.enumerateDevices()`), a different
+namespace from `wake_word.input_device` — that one is a **PortAudio** index for wake-word capture on the
+Python side. Worth remembering if the pickers ever return: an unplugged device must fall back to the system
+default *and say so*, rather than switching silently.
 
 ## Verify and layout
 
