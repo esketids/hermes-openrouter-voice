@@ -105,9 +105,17 @@ this repo's tree** — a plugin-catalog entry may not ship a patch for the app �
 **`gui-rows`**, with a copy on each machine that uses it:
 
 ```bash
-~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh               # patch + repack
-~/.hermes/patches/openrouter-voice-gui/apply-gui-rows.sh --no-pack     # patch only
+KIT=~/.hermes/patches/openrouter-voice-gui/active-d4d2ab7b5d   # the kit names its base
+$KIT/apply-gui-rows.sh              # apply + repack
+$KIT/apply-gui-rows.sh --no-pack    # apply only
+
+rm -rf ~/Applications/Hermes.app    # then move the build into your app home
+cp -R ~/.hermes/hermes-agent/apps/desktop/release/mac-arm64/Hermes.app ~/Applications/Hermes.app
 ```
+
+`gui/MANUAL.md` is the offline runbook: the one-command reapply, the three-way re-cut when the base
+has moved, the checks worth running, and the pitfalls (including why `npx tsc --noEmit` needs
+`NODE_OPTIONS=--max-old-space-size=8192` to avoid a heap crash).
 
 Each row lands in the subpage its key belongs to (routing is by key prefix), so nothing piles up in one
 pane:
@@ -130,6 +138,12 @@ The rows live in a bundle-compiled list, so no plugin or config key can add one.
 fragile, both handled in `gui/`: `hermes update` replaces the checkout (re-run the script — a watchdog
 notices and reports, staying silent while healthy), and the patch is cut against **one commit**, so a moved
 base makes it fail loudly rather than half-apply.
+
+Current cut: base **`d4d2ab7b5d`**, re-cut from `45871e100f` (4,205 commits of drift, all of it in
+`settings/constants.ts` and `settings/config-field.tsx`, both ported by three-way merge). The applied rows
+also live as a commit on the Hermes checkout's `gui-rows` branch, so an update cannot silently stash them.
+The watchdog script is current but **its cron job is no longer scheduled** (`~/.hermes/cron/jobs.json` is
+empty), so it reports nothing by itself — run the applier after an update.
 
 The microphone and speaker rows use **browser device ids** (`navigator.mediaDevices.enumerateDevices()`), a
 different namespace from `wake_word.input_device` — that one is a **PortAudio** index for wake-word capture
